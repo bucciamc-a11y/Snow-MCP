@@ -415,8 +415,8 @@ async def test_rejected_write_passes_only_sanitised_detail():
 
 async def test_client_refuses_unlisted_methods_and_tables():
     c, seen = make_client(lambda r: httpx.Response(200, json={"result": {}}))
-    for method, table in (("DELETE", "incident"), ("PUT", "incident"), ("PATCH", "change_request"),
-                          ("POST", "change_request"), ("PATCH", "sys_user"), ("POST", "sysapproval_approver"),
+    for method, table in (("DELETE", "incident"), ("PUT", "incident"), ("DELETE", "change_request"),
+                          ("PUT", "change_request"), ("PATCH", "sys_user"), ("POST", "sysapproval_approver"),
                           ("POST", "sys_user")):
         with pytest.raises(ValueError):
             await c._request(method, table, sys_id=INC, body={"a": "b"})

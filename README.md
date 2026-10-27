@@ -19,8 +19,10 @@ during setup, so `tools/list` always shows exactly what the integration can do.
 | `add_oncall_member`, `update_oncall_member` | `MCP_ENABLE_ONCALL_WRITES` | Add a roster member; change order/valid dates |
 | `search_problems`, `get_problem` | `MCP_ENABLE_PROBLEM_READ` | Filter problems (state, known errors, CI, group...); one problem with cause/workaround/fix notes and its linked incidents |
 | `create_problem`, `update_problem`, `resolve_problem`, `link_incident_to_problem` | `MCP_ENABLE_PROBLEM_WRITES` (implies the problem read tools) | Raise a problem, record root cause / workaround / known error, move it through assess -> RCA -> fix in progress, resolve it, link incidents to it |
+| `search_change_requests` | `MCP_ENABLE_CHANGE_READ` | Filter change requests (phase, type, priority, CI, group, dates...) |
+| `create_change_request`, `update_change_request`, `transition_change_request`, `close_change_request`, `cancel_change_request` | `MCP_ENABLE_CHANGE_WRITES` (implies the change search tool) | Create a change, edit it while open, move it forward through its phases (assess -> authorize -> scheduled -> implement -> review), close it with a close code and notes, or cancel it with a reason |
 
-Never available: delete, closing/cancelling incidents, closing problems, rejecting changes, editing other tables, scripts, or any
+Never available: delete, closing/cancelling incidents, closing problems, rejecting changes, moving a change backwards, editing other tables, scripts, or any
 generic "call this ServiceNow API" tool.
 
 ### How writes are kept safe
@@ -34,7 +36,11 @@ generic "call this ServiceNow API" tool.
   on-call edits only touch roster-member order/valid dates; nothing is ever deleted. Problem edits can move a
   problem only to assess / root-cause-analysis / fix-in-progress (resolving is its own tool, closing does not
   exist), only to teams in `MCP_ASSIGNMENT_GROUPS`, never touch resolved/closed problems, and linking never moves
-  an incident that already belongs to a different problem.
+  an incident that already belongs to a different problem. Change edits cannot set the type or the phase directly:
+  `transition_change_request` only moves a change to a *later* phase, closing is allowed only from Implement or
+  Review, cancelling needs a recorded reason, finished (closed/canceled) changes can never be touched, agents can
+  only create the change types in `MCP_CHANGE_CREATE_TYPES` (emergency is excluded by default), and ServiceNow's
+  own approval and mandatory-field rules still apply to every move.
 * **Guards on state:** closed/canceled incidents cannot be edited; resolved/closed/canceled cannot be resolved or
   assigned (checked on raw state values, not localised labels).
 * **Prompt-injection resistance:** text fields are plain text only (control and bidi-override characters rejected),
@@ -77,6 +83,13 @@ Hermes ──HTTPS + Authorization: Bearer <MCP token>──▶ Traefik (TLS, yo
   them against the State column of your Problems list (show raw values) before enabling problem writes. Field
   names (`cause_notes`, `fix_notes`, `workaround`, `known_error`, `resolution_code`, `problem_id`) follow the
   standard problem/incident tables and were not verified against your instance.
+* **Change state model:** change phases are names (new, assess, authorize, scheduled, implement, review, closed,
+  canceled) mapped to raw values through `MCP_CHANGE_STATES`. The default is the model-based lifecycle of current
+  releases (`new=-5;assess=-4;authorize=-3;scheduled=-2;implement=-1;review=0;closed=3;canceled=4`); older instances
+  use other numbers or state flows. Setup asks for them when you enable a change feature. Your change models,
+  mandatory fields (e.g. close code), approval policies and data policies decide which moves ServiceNow accepts;
+  a refused move comes back as an error and nothing is retried. Standard-change templates and change models are not
+  set by these tools (new changes get the instance's defaults for the chosen type).
 * **Hermes:** documented config (as of late 2026) is `mcp_servers:` in `~/.hermes/config.yaml` with
   `url`, `headers`, `timeout`, `tools.include`; `${VAR}` placeholders resolved from `~/.hermes/.env`;
   tools named `mcp_<server>_<tool>`. The Hermes format was written from its public documentation and not checked against every version; if yours differs use

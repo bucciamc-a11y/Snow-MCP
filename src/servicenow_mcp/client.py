@@ -31,6 +31,7 @@ from .validation import (
     CHANGE_NUMBER_RE,
     INCIDENT_NUMBER_RE,
     PROBLEM_NUMBER_RE,
+    ChangeSearch,
     IncidentSearch,
     ProblemSearch,
     validate_identifier,
@@ -57,13 +58,14 @@ PROBLEM_FIELDS = (
 CHANGE_FIELDS = (
     "sys_id,number,short_description,description,state,type,priority,risk,impact,category,"
     "requested_by,assigned_to,assignment_group,business_service,cmdb_ci,approval,justification,"
-    "implementation_plan,backout_plan,start_date,end_date,opened_at,sys_updated_on,closed_at,active"
+    "implementation_plan,backout_plan,test_plan,start_date,end_date,opened_at,sys_updated_on,closed_at,"
+    "close_code,active"
 )
 APPROVER_FIELDS = "sys_id,approver,state,sysapproval,comments,sys_updated_on"
 ROTA_FIELDS = "sys_id,name,group,active,description,schedule,time_zone,sys_updated_on"
 ROSTER_FIELDS = "sys_id,name,rota,order,active,schedule,time_zone,sys_updated_on"
 MEMBER_FIELDS = "sys_id,member,roster,order,from,to,sys_updated_on"
-_TEXT_FIELDS = {"description", "justification", "implementation_plan", "backout_plan",
+_TEXT_FIELDS = {"description", "justification", "implementation_plan", "backout_plan", "test_plan",
                 "cause_notes", "workaround", "fix_notes"}
 
 _TABLES = {
@@ -87,6 +89,8 @@ _WRITES = {
     ("PATCH", "incident"),
     ("POST", "problem"),
     ("PATCH", "problem"),
+    ("POST", "change_request"),
+    ("PATCH", "change_request"),
     ("PATCH", "sysapproval_approver"),
     ("POST", "cmn_rota_member"),
     ("PATCH", "cmn_rota_member"),
@@ -433,6 +437,48 @@ class ServiceNowClient:
         validate_sys_id(sys_id, "sys_id")
         data, _ = await self._request(
             "PATCH", "problem", sys_id=sys_id, params=self._display_params(PROBLEM_FIELDS), body=fields
+        )
+        return self._one(data)
+
+    # -- change reads / writes ---------------------------------------------------
+    async def search_change_requests(self, search: ChangeSearch) -> dict[str, Any]:
+        records, total = await self._list("change_request", search.query, CHANGE_FIELDS, search.limit, search.offset)
+        more = search.offset + len(records) < total if total is not None else len(records) == search.limit
+        return {
+            "count": len(records),
+            "total_count": total,
+            "offset": search.offset,
+            "next_offset": search.offset + len(records) if more else None,
+            "change_requests": records,
+        }
+
+    async def get_change_raw(self, identifier: str) -> dict[str, str]:
+        """Raw (non-display) sys_id/number/state/type, used for write guards that must not depend on locale."""
+        kind, value = validate_identifier(identifier, CHANGE_NUMBER_RE, "change")
+        params = {"sysparm_fields": "sys_id,number,state,type,approval", "sysparm_display_value": "false",
+                  "sysparm_exclude_reference_link": "true"}
+        if kind == "sys_id":
+            data, _ = await self._request("GET", "change_request", sys_id=value, params=params)
+            result = data["result"]
+        else:
+            params.update({"sysparm_query": f"number={value}", "sysparm_limit": "1"})
+            data, _ = await self._request("GET", "change_request", params=params)
+            rows = data["result"]
+            result = rows[0] if isinstance(rows, list) and rows else None
+        if not isinstance(result, dict) or not result.get("sys_id"):
+            raise NotFoundError
+        flat = {k: (v.get("value") if isinstance(v, dict) else v) for k, v in result.items()}
+        return {k: str(v) for k, v in flat.items() if v is not None}
+
+    async def create_change(self, fields: dict[str, str]) -> dict[str, Any]:
+        data, _ = await self._request("POST", "change_request", params=self._display_params(CHANGE_FIELDS),
+                                      body=fields)
+        return self._one(data)
+
+    async def update_change(self, sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
+        validate_sys_id(sys_id, "sys_id")
+        data, _ = await self._request(
+            "PATCH", "change_request", sys_id=sys_id, params=self._display_params(CHANGE_FIELDS), body=fields
         )
         return self._one(data)
 

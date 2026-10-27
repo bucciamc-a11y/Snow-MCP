@@ -104,6 +104,15 @@ DEFAULT_PROBLEM_STATES = (
     ("fix_in_progress", "104"), ("resolved", "106"), ("closed", "107"),
 )
 _STATE_VALUE_RE = re.compile(r"^\d{1,4}\Z")
+
+# Change request phases the tools understand and the default raw values (the model-based lifecycle of
+# current releases: negative numbers for the early phases). Override with MCP_CHANGE_STATES if yours differ.
+CHANGE_STATE_NAMES = ("new", "assess", "authorize", "scheduled", "implement", "review", "closed", "canceled")
+DEFAULT_CHANGE_STATES = (
+    ("new", "-5"), ("assess", "-4"), ("authorize", "-3"), ("scheduled", "-2"),
+    ("implement", "-1"), ("review", "0"), ("closed", "3"), ("canceled", "4"),
+)
+_CHANGE_STATE_VALUE_RE = re.compile(r"^-?\d{1,4}\Z")
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9._@-]{1,80}\Z")
 _TYPE_RE = re.compile(r"^[a-z][a-z _-]{0,30}\Z")
 _TEAM_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.&-]{0,59}\Z")
@@ -126,25 +135,41 @@ def _parse_teams(raw: str) -> tuple[tuple[str, str], ...]:
     return tuple(teams)
 
 
-def _parse_problem_states(raw: str) -> tuple[tuple[str, str], ...]:
-    """Parse ``resolved=106;closed=107`` overrides on top of the defaults (all six names stay mapped)."""
-    mapping = dict(DEFAULT_PROBLEM_STATES)
+def _parse_state_map(
+    raw: str,
+    var: str,
+    example: str,
+    names: tuple[str, ...],
+    defaults: tuple[tuple[str, str], ...],
+    value_re: re.Pattern[str],
+) -> tuple[tuple[str, str], ...]:
+    """Parse ``name=value;...`` overrides on top of the defaults (every name stays mapped)."""
+    mapping = dict(defaults)
     seen: set[str] = set()
     for item in (p for p in raw.split(";") if p.strip()):
         name, sep, value = item.partition("=")
         name, value = name.strip().lower(), value.strip()
-        if not sep or name not in PROBLEM_STATE_NAMES or not _STATE_VALUE_RE.match(value):
+        if not sep or name not in names or not value_re.match(value):
             raise ConfigError(
-                "MCP_PROBLEM_STATES entries must look like 'resolved=106' with a name from: "
-                + ", ".join(PROBLEM_STATE_NAMES)
+                f"{var} entries must look like '{example}' with a name from: " + ", ".join(names)
             )
         if name in seen:
-            raise ConfigError("MCP_PROBLEM_STATES lists a state name twice")
+            raise ConfigError(f"{var} lists a state name twice")
         seen.add(name)
         mapping[name] = value
     if len(set(mapping.values())) != len(mapping):
-        raise ConfigError("MCP_PROBLEM_STATES must map every state to a different value")
-    return tuple((n, mapping[n]) for n in PROBLEM_STATE_NAMES)
+        raise ConfigError(f"{var} must map every state to a different value")
+    return tuple((n, mapping[n]) for n in names)
+
+
+def _parse_problem_states(raw: str) -> tuple[tuple[str, str], ...]:
+    return _parse_state_map(raw, "MCP_PROBLEM_STATES", "resolved=106", PROBLEM_STATE_NAMES,
+                            DEFAULT_PROBLEM_STATES, _STATE_VALUE_RE)
+
+
+def _parse_change_states(raw: str) -> tuple[tuple[str, str], ...]:
+    return _parse_state_map(raw, "MCP_CHANGE_STATES", "closed=3", CHANGE_STATE_NAMES,
+                            DEFAULT_CHANGE_STATES, _CHANGE_STATE_VALUE_RE)
 
 
 def _is_loopback(host: str) -> bool:
@@ -198,6 +223,10 @@ class Settings:
     enable_problem_read: bool = False  # search_problems, get_problem
     enable_problem_writes: bool = False  # create/update/resolve_problem, link_incident_to_problem (implies read)
     problem_states: tuple[tuple[str, str], ...] = DEFAULT_PROBLEM_STATES  # state name -> raw ServiceNow value
+    enable_change_read: bool = False  # search_change_requests
+    enable_change_writes: bool = False  # create/update/transition/close/cancel change (implies read)
+    change_states: tuple[tuple[str, str], ...] = DEFAULT_CHANGE_STATES  # phase name -> raw ServiceNow value
+    change_create_types: tuple[str, ...] = ("normal", "standard")  # types an agent may create
     assignment_teams: tuple[tuple[str, str], ...] = ()  # (display name, group sys_id) allowlist
     approval_allowed_types: tuple[str, ...] = ("standard", "normal")
     write_rate_limit_per_minute: int = 20
@@ -205,6 +234,10 @@ class Settings:
     @property
     def problem_state_map(self) -> dict[str, str]:
         return dict(self.problem_states)
+
+    @property
+    def change_state_map(self) -> dict[str, str]:
+        return dict(self.change_states)
 
     @property
     def native_tls(self) -> bool:
@@ -290,6 +323,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     oncall_writes = _bool(env, "MCP_ENABLE_ONCALL_WRITES")
     problem_writes = _bool(env, "MCP_ENABLE_PROBLEM_WRITES")
     problem_states = _parse_problem_states(env.get("MCP_PROBLEM_STATES", ""))
+    change_writes = _bool(env, "MCP_ENABLE_CHANGE_WRITES")
+    change_states = _parse_change_states(env.get("MCP_CHANGE_STATES", ""))
+    create_types = tuple(
+        t.strip().lower() for t in env.get("MCP_CHANGE_CREATE_TYPES", "normal,standard").split(",") if t.strip()
+    )
+    if change_writes and (not create_types or not all(_TYPE_RE.match(t) for t in create_types)):
+        raise ConfigError("MCP_CHANGE_CREATE_TYPES must be a comma list such as normal,standard")
 
     return Settings(
         enable_incident_writes=_bool(env, "MCP_ENABLE_INCIDENT_WRITES"),
@@ -300,6 +340,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         enable_problem_read=_bool(env, "MCP_ENABLE_PROBLEM_READ") or problem_writes,
         enable_problem_writes=problem_writes,
         problem_states=problem_states,
+        enable_change_read=_bool(env, "MCP_ENABLE_CHANGE_READ") or change_writes,
+        enable_change_writes=change_writes,
+        change_states=change_states,
+        change_create_types=create_types or ("normal", "standard"),
         assignment_teams=teams,
         approval_allowed_types=types or ("standard", "normal"),
         write_rate_limit_per_minute=_int(env, "MCP_WRITE_RATE_LIMIT_PER_MINUTE", 20, 1, 300),

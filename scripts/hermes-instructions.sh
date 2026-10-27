@@ -25,6 +25,10 @@ if flag MCP_ENABLE_PROBLEM_READ || flag MCP_ENABLE_PROBLEM_WRITES; then INCLUDE+
 if flag MCP_ENABLE_PROBLEM_WRITES; then
   INCLUDE+=", create_problem, update_problem, resolve_problem, link_incident_to_problem"; WRITES=1
 fi
+if flag MCP_ENABLE_CHANGE_READ || flag MCP_ENABLE_CHANGE_WRITES; then INCLUDE+=", search_change_requests"; fi
+if flag MCP_ENABLE_CHANGE_WRITES; then
+  INCLUDE+=", create_change_request, update_change_request, transition_change_request, close_change_request, cancel_change_request"; WRITES=1
+fi
 WRITE_NOTE=""
 [[ -n $WRITES ]] && WRITE_NOTE=" Write tools preview first; they change nothing until called again with confirm=true.
     Keep Hermes' own tool-approval prompts ON for the write tools so a human approves each change."

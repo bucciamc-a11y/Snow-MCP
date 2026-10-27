@@ -24,6 +24,12 @@ through this integration; say so and offer to draft the text for the user to app
 | `update_problem` | write | Edit an open problem: text, `cause_notes`, `workaround`, `fix_notes`, `known_error`, `state` (assess / root_cause_analysis / fix_in_progress only), `team`, `work_note`, `comment`. Cannot resolve or close |
 | `resolve_problem` | write | Set Resolved with `cause_notes` + `fix_notes` (and `resolution_code` if the instance requires one). Never closes the problem |
 | `link_incident_to_problem` | write | Set an incident's problem to a given problem. Refuses closed/canceled incidents, resolved/closed problems, and incidents already linked to a different problem |
+| `search_change_requests` | read | Filter changes: `state` (new/assess/authorize/scheduled/implement/review/closed/canceled), `active`, `type` (normal/standard/emergency), `priority`, `category`, `assignment_group`, `cmdb_ci` (sys_ids), `short_description_contains`, `opened_after/before` (UTC), `order_by` (also `start_date`), `descending`, `limit` (<=50), `offset` |
+| `create_change_request` | write | New change (starts in New): `short_description` (required), `type` (default normal; only the types the administrator allows), `description`, `justification`, `implementation_plan`, `backout_plan`, `test_plan`, `category`, `impact` (1-3), `start_date`/`end_date` (UTC), `cmdb_ci`, `business_service`, `team` |
+| `update_change_request` | write | Edit an open change: text, plans, dates, CI, `team`, `work_note`, `comment`. Cannot change type or phase, and refuses closed/canceled changes |
+| `transition_change_request` | write | Move a change **forward** to a later phase: `to_phase` = assess / authorize / scheduled / implement / review, optional `work_note`. Never backwards; cannot close or cancel. ServiceNow still enforces approvals and mandatory fields |
+| `close_change_request` | write | Close a change that is in Implement or Review, with `close_code` (as accepted by the instance, e.g. successful / successful_issues / unsuccessful) and `close_notes` |
+| `cancel_change_request` | write | Cancel an open change; `reason` is required and recorded as a work note. Cannot be undone through this integration |
 
 ## Rules for write tools (always follow)
 
@@ -68,6 +74,18 @@ through this integration; say so and offer to draft the text for the user to app
   model: if it answers "rejected the data (HTTP 400)" report the message, do not retry with other values.
 - **Resolve a problem:** `resolve_problem` needs a real `cause_notes` and `fix_notes` taken from the records or the
   user, not filler. Closing a problem is not possible here; tell the user to close it in ServiceNow.
+
+- **Raise a change:** `search_change_requests` for a similar open change first -> `create_change_request` preview with
+  `justification`, `implementation_plan`, `backout_plan`, `test_plan` and the planned `start_date`/`end_date` ->
+  confirm. Emergency changes are normally blocked; if the tool says the type is not allowed, tell the user.
+- **Move a change along:** `get_change_request` to see the current phase -> `transition_change_request` to the *next*
+  phase (preview, then confirm) with a short `work_note` saying why. Moving to `authorize` does not approve anything:
+  approvers act in ServiceNow, or `approve_change_request` if it is available and the approval is assigned to the
+  integration account. If ServiceNow answers "rejected the data (HTTP 400)" or 403, report the message (usually a
+  missing approval or mandatory field); do not retry with other phases.
+- **Finish a change:** after implementation move it to `review`, then `close_change_request` with an honest
+  `close_code` and `close_notes` taken from the records or the user. To stop a change that will not run use
+  `cancel_change_request` with the real reason. Both are one-way: always show the preview and wait for a clear yes.
 
 ## Search tips
 

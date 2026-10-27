@@ -25,7 +25,13 @@ from .logging_setup import configure_logging
 from .validation import (
     BLOCKED_RESOLVE_STATES,
     BLOCKED_UPDATE_STATES,
+    CHANGE_PHASES,
     ValidationError,
+    build_change_cancel,
+    build_change_close,
+    build_change_fields,
+    build_change_search,
+    build_change_transition,
     build_incident_fields,
     build_incident_resolution,
     build_incident_search,
@@ -47,6 +53,8 @@ SysId = Annotated[str, Field(min_length=32, max_length=32, description="32-chara
 IncidentRef = Annotated[str, Field(description="Incident number (INC0010001) or 32-char hex sys_id")]
 ProblemRef = Annotated[str, Field(description="Problem number (PRB0010001) or 32-char hex sys_id")]
 ProblemState = Literal["new", "assess", "root_cause_analysis", "fix_in_progress", "resolved", "closed"]
+ChangeRef = Annotated[str, Field(description="Change number (CHG0030001) or 32-char hex sys_id")]
+ChangePhase = Literal["new", "assess", "authorize", "scheduled", "implement", "review", "closed", "canceled"]
 Confirm = Annotated[
     bool,
     Field(description="false (default): preview only, nothing is changed. true: apply the change "
@@ -121,8 +129,10 @@ def _instructions(s: Settings) -> str:
     ]
     if s.enable_problem_read:
         parts.append("Problem tools: search_problems, get_problem (get_problem also lists linked incidents).")
+    if s.enable_change_read:
+        parts.append("Change tools: search_change_requests.")
     if (s.enable_incident_writes or s.enable_incident_assignment or s.enable_change_approval
-            or s.enable_oncall_writes or s.enable_problem_writes):
+            or s.enable_oncall_writes or s.enable_problem_writes or s.enable_change_writes):
         parts.append(
             "Write tools are enabled. Every write tool previews first (confirm=false) and changes "
             "nothing until you call it again with confirm=true after the user approves. Never "
@@ -715,6 +725,236 @@ def create_mcp(settings: Settings, client: ServiceNowClient) -> FastMCP:
 
             return await _audited("link_incident_to_problem", params, run, str(incident), write=True)
 
+    # ======================= change management =======================
+    if settings.enable_change_read:
+
+        @mcp.tool(annotations=READ_ONLY)
+        async def search_change_requests(
+            state: Annotated[ChangePhase | None, Field(description="Change phase")] = None,
+            active: Annotated[bool | None, Field(description="Only open (true) or finished (false) changes")] = None,
+            type: Annotated[Literal["normal", "standard", "emergency"] | None, Field(description="Change type")] = None,
+            priority: Annotated[int | None, Field(ge=1, le=5, description="1=critical .. 5=planning")] = None,
+            category: Annotated[str | None, Field(max_length=40)] = None,
+            assignment_group: Annotated[str | None, Field(description="Assignment group sys_id (32 hex chars)")] = None,
+            cmdb_ci: Annotated[str | None, Field(description="Configuration item sys_id (32 hex chars)")] = None,
+            short_description_contains: Annotated[str | None, Field(max_length=100, description="Substring match; letters, digits, spaces and . , : ; / @ # ( ) + _ -")] = None,
+            opened_after: Annotated[str | None, Field(description="UTC, YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")] = None,
+            opened_before: Annotated[str | None, Field(description="UTC, YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")] = None,
+            order_by: Annotated[Literal["opened_at", "updated_at", "priority", "number", "start_date"], Field()] = "opened_at",
+            descending: bool = True,
+            limit: Annotated[int, Field(ge=1, le=100, description="Page size (the server may cap this lower; default cap 50)")] = 10,
+            offset: Annotated[int, Field(ge=0, le=10000, description="Use next_offset from the previous page")] = 0,
+        ) -> dict[str, Any]:
+            """Find change requests using validated filters (use active=true for open changes). Returns a
+            page plus total_count and next_offset."""
+            params = {
+                "state": state, "active": active, "type": type, "priority": priority, "category": category,
+                "assignment_group": assignment_group, "cmdb_ci": cmdb_ci,
+                "short_description_contains": short_description_contains, "opened_after": opened_after,
+                "opened_before": opened_before, "order_by": order_by, "descending": descending,
+                "limit": limit, "offset": offset,
+            }
+
+            async def run() -> dict[str, Any]:
+                search = build_change_search(
+                    state_map=settings.change_state_map, state=state, active=active, change_type=type,
+                    priority=priority, category=category, assignment_group=assignment_group, cmdb_ci=cmdb_ci,
+                    short_description_contains=short_description_contains, opened_after=opened_after,
+                    opened_before=opened_before, order_by=order_by, descending=descending, limit=limit,
+                    offset=offset, max_limit=settings.max_page_size,
+                )
+                return await client.search_change_requests(search)
+
+            return await _audited("search_change_requests", params, run)
+
+    if settings.enable_change_writes:
+        cstates = settings.change_state_map
+        phase_of = {value: name for name, value in cstates.items()}
+        finished_changes = {cstates["closed"], cstates["canceled"]}
+
+        async def open_change(identifier: str) -> dict[str, str]:
+            raw = await client.get_change_raw(identifier)
+            if raw.get("state") in finished_changes:
+                raise ServiceNowError("change is closed or canceled and cannot be changed", code="not_allowed")
+            return raw
+
+        @mcp.tool(annotations=WRITE_NEW)
+        async def create_change_request(
+            short_description: Annotated[str, Field(min_length=1, max_length=160, description="One-line summary")],
+            type: Annotated[Literal["normal", "standard", "emergency"], Field(description="Change type; the administrator limits which types may be created")] = "normal",
+            description: LongText = None,
+            justification: LongText = None,
+            implementation_plan: LongText = None,
+            backout_plan: LongText = None,
+            test_plan: LongText = None,
+            category: Annotated[str | None, Field(max_length=40)] = None,
+            impact: Urgency = None,
+            start_date: Annotated[str | None, Field(description="Planned start, UTC: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")] = None,
+            end_date: Annotated[str | None, Field(description="Planned end, UTC")] = None,
+            cmdb_ci: Annotated[str | None, Field(description="Configuration item sys_id")] = None,
+            business_service: Annotated[str | None, Field(description="Business service sys_id")] = None,
+            team: Annotated[str | None, Field(description="Assignment team name from the administrator's configured list")] = None,
+            confirm: Confirm = False,
+        ) -> dict[str, Any]:
+            """Create a change request (starts in the New phase). Preview first (confirm=false), then confirm=true.
+            Move it through its phases afterwards with transition_change_request."""
+            params = {"short_description": short_description, "type": type, "description": description,
+                      "justification": justification, "implementation_plan": implementation_plan,
+                      "backout_plan": backout_plan, "test_plan": test_plan, "category": category,
+                      "impact": impact, "start_date": start_date, "end_date": end_date, "cmdb_ci": cmdb_ci,
+                      "business_service": business_service, "team": team, "confirm": confirm}
+
+            async def run() -> dict[str, Any]:
+                fields = build_change_fields(
+                    allowed_types=settings.change_create_types, short_description=short_description,
+                    change_type=type, description=description, justification=justification,
+                    implementation_plan=implementation_plan, backout_plan=backout_plan, test_plan=test_plan,
+                    category=category, impact=impact, start_date=start_date, end_date=end_date, cmdb_ci=cmdb_ci,
+                    business_service=business_service, require_short_description=True,
+                    max_text=settings.max_text_chars,
+                )
+                if team is not None:
+                    fields["assignment_group"] = resolve_problem_team(team)[1]
+                if not confirm:
+                    return _preview("create_change_request", fields_to_set=fields)
+                return {"executed": True, "change_request": await client.create_change(fields)}
+
+            return await _audited("create_change_request", params, run, write=True)
+
+        @mcp.tool(annotations=WRITE_MODIFY)
+        async def update_change_request(
+            identifier: ChangeRef,
+            short_description: Annotated[str | None, Field(max_length=160)] = None,
+            description: LongText = None,
+            justification: LongText = None,
+            implementation_plan: LongText = None,
+            backout_plan: LongText = None,
+            test_plan: LongText = None,
+            category: Annotated[str | None, Field(max_length=40)] = None,
+            impact: Urgency = None,
+            start_date: Annotated[str | None, Field(description="Planned start, UTC")] = None,
+            end_date: Annotated[str | None, Field(description="Planned end, UTC")] = None,
+            cmdb_ci: Annotated[str | None, Field(description="Configuration item sys_id")] = None,
+            business_service: Annotated[str | None, Field(description="Business service sys_id")] = None,
+            team: Annotated[str | None, Field(description="Reassign to a team from the configured list")] = None,
+            work_note: Annotated[str | None, Field(max_length=4000, description="Internal work note to append")] = None,
+            comment: Annotated[str | None, Field(max_length=4000, description="Additional comment to append")] = None,
+            confirm: Confirm = False,
+        ) -> dict[str, Any]:
+            """Edit an open change (not closed/canceled): text, plans, dates, CI, team, notes. It cannot change the
+            type or the phase (use transition_change_request). Preview first (confirm=false)."""
+            params = {"identifier": identifier, "short_description": short_description,
+                      "description": description, "justification": justification,
+                      "implementation_plan": implementation_plan, "backout_plan": backout_plan,
+                      "test_plan": test_plan, "category": category, "impact": impact, "start_date": start_date,
+                      "end_date": end_date, "cmdb_ci": cmdb_ci, "business_service": business_service,
+                      "team": team, "work_note": work_note, "comment": comment, "confirm": confirm}
+
+            async def run() -> dict[str, Any]:
+                fields = build_change_fields(
+                    short_description=short_description, description=description, justification=justification,
+                    implementation_plan=implementation_plan, backout_plan=backout_plan, test_plan=test_plan,
+                    category=category, impact=impact, start_date=start_date, end_date=end_date, cmdb_ci=cmdb_ci,
+                    business_service=business_service, work_note=work_note, comment=comment,
+                    max_text=settings.max_text_chars,
+                )
+                if team is not None:
+                    fields["assignment_group"] = resolve_problem_team(team)[1]
+                if not fields:
+                    raise ValidationError("provide at least one field to change")
+                raw = await open_change(identifier)
+                if not confirm:
+                    return _preview("update_change_request",
+                                    change_request=await client.get_record("change_request", raw["sys_id"]),
+                                    fields_to_set=fields)
+                return {"executed": True, "change_request": await client.update_change(raw["sys_id"], fields)}
+
+            return await _audited("update_change_request", params, run, str(identifier), write=True)
+
+        @mcp.tool(annotations=WRITE_MODIFY)
+        async def transition_change_request(
+            identifier: ChangeRef,
+            to_phase: Annotated[Literal["assess", "authorize", "scheduled", "implement", "review"],
+                                Field(description="The phase to move to; must be later than the current one")],
+            work_note: Annotated[str | None, Field(max_length=4000, description="Optional note recording why")] = None,
+            confirm: Confirm = False,
+        ) -> dict[str, Any]:
+            """Move a change forward to a later lifecycle phase (assess, authorize, scheduled, implement, review).
+            ServiceNow still enforces its own rules (approvals, mandatory fields) and may reject the move. Never
+            moves backwards and cannot close or cancel (use close_change_request / cancel_change_request).
+            Preview first (confirm=false)."""
+            params = {"identifier": identifier, "to_phase": to_phase, "work_note": work_note, "confirm": confirm}
+
+            async def run() -> dict[str, Any]:
+                fields = build_change_transition(to_phase, cstates, work_note, settings.max_text_chars)
+                raw = await open_change(identifier)
+                current = phase_of.get(raw.get("state", ""))
+                if current is None or current not in CHANGE_PHASES:
+                    raise ServiceNowError(
+                        "the change is in a state this server does not recognise; check MCP_CHANGE_STATES "
+                        "or move it in ServiceNow", code="not_allowed")
+                if CHANGE_PHASES.index(to_phase) <= CHANGE_PHASES.index(current):
+                    raise ServiceNowError(
+                        f"the change is already in '{current}'; it can only move forward to a later phase",
+                        code="not_allowed")
+                if not confirm:
+                    return _preview("transition_change_request", from_phase=current, to_phase=to_phase,
+                                    change_request=await client.get_record("change_request", raw["sys_id"]),
+                                    fields_to_set=fields)
+                return {"executed": True, "from_phase": current, "to_phase": to_phase,
+                        "change_request": await client.update_change(raw["sys_id"], fields)}
+
+            return await _audited("transition_change_request", params, run, str(identifier), write=True)
+
+        @mcp.tool(annotations=WRITE_MODIFY)
+        async def close_change_request(
+            identifier: ChangeRef,
+            close_code: Annotated[str, Field(min_length=1, max_length=60, description="Close code accepted by your instance, e.g. 'successful', 'successful_issues' or 'unsuccessful'")],
+            close_notes: Annotated[str, Field(min_length=1, max_length=4000, description="Outcome and close notes")],
+            confirm: Confirm = False,
+        ) -> dict[str, Any]:
+            """Close a change that is in Implement or Review, with a close code and close notes. Preview first
+            (confirm=false). To stop a change that never ran, use cancel_change_request instead."""
+            params = {"identifier": identifier, "close_code": close_code, "close_notes": close_notes,
+                      "confirm": confirm}
+
+            async def run() -> dict[str, Any]:
+                fields = build_change_close(close_code, close_notes, cstates["closed"], settings.max_text_chars)
+                raw = await open_change(identifier)
+                current = phase_of.get(raw.get("state", ""))
+                if current not in ("implement", "review"):
+                    raise ServiceNowError(
+                        "only a change in Implement or Review can be closed; move it forward first, or use "
+                        "cancel_change_request to stop it", code="not_allowed")
+                if not confirm:
+                    return _preview("close_change_request", from_phase=current,
+                                    change_request=await client.get_record("change_request", raw["sys_id"]),
+                                    fields_to_set=fields)
+                return {"executed": True, "change_request": await client.update_change(raw["sys_id"], fields)}
+
+            return await _audited("close_change_request", params, run, str(identifier), write=True)
+
+        @mcp.tool(annotations=WRITE_MODIFY)
+        async def cancel_change_request(
+            identifier: ChangeRef,
+            reason: Annotated[str, Field(min_length=1, max_length=4000, description="Why the change is being cancelled (recorded as a work note)")],
+            confirm: Confirm = False,
+        ) -> dict[str, Any]:
+            """Cancel an open change that has not been closed. The reason is recorded as a work note. Preview
+            first (confirm=false); cancelling cannot be undone through this integration."""
+            params = {"identifier": identifier, "reason": reason, "confirm": confirm}
+
+            async def run() -> dict[str, Any]:
+                fields = build_change_cancel(reason, cstates["canceled"], settings.max_text_chars)
+                raw = await open_change(identifier)
+                if not confirm:
+                    return _preview("cancel_change_request",
+                                    change_request=await client.get_record("change_request", raw["sys_id"]),
+                                    fields_to_set=fields)
+                return {"executed": True, "change_request": await client.update_change(raw["sys_id"], fields)}
+
+            return await _audited("cancel_change_request", params, run, str(identifier), write=True)
+
     return mcp
 
 
@@ -754,7 +994,8 @@ def main() -> None:
             "event": "startup",
             "path": f"{settings.bind_host}:{settings.bind_port}",
             "params": [n for n in ("incident_writes", "incident_assignment", "change_approval", "oncall_read",
-                                   "oncall_writes", "problem_read", "problem_writes")
+                                   "oncall_writes", "problem_read", "problem_writes", "change_read",
+                                   "change_writes")
                        if getattr(settings, f"enable_{n}")],
         },
     )

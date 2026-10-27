@@ -8,8 +8,8 @@ Incident: `sys_id, number, short_description, description, state, priority, urge
 category, subcategory, caller_id, assigned_to, assignment_group, business_service, cmdb_ci, active, opened_at,
 opened_by, updated_at, resolved_at, closed_at, close_code`. Change request: `sys_id, number, short_description,
 description, state, type, priority, risk, impact, category, requested_by, assigned_to, assignment_group,
-business_service, cmdb_ci, approval, justification, implementation_plan, backout_plan, start_date, end_date,
-opened_at, updated_at, closed_at, active`. Problem: `sys_id, number, short_description, description, state, priority,
+business_service, cmdb_ci, approval, justification, implementation_plan, backout_plan, test_plan, start_date,
+end_date, opened_at, updated_at, closed_at, close_code, active`. Problem: `sys_id, number, short_description, description, state, priority,
 urgency, impact, category, subcategory, assignment_group, assigned_to, business_service, cmdb_ci, known_error, active,
 cause_notes, workaround, fix_notes, resolution_code, related_incidents, first_reported_by_task, opened_at, opened_by,
 updated_at, resolved_at, closed_at` (incidents additionally show `problem_id`). **Excluded on purpose:** work notes, comments, attachments, close
@@ -24,6 +24,7 @@ choice fields are returned as display values. Records the account cannot read be
 | `get_incident` | `identifier`: `INC` + 7-10 digits, or 32-hex sys_id | read `incident` |
 | `get_change_request` | `identifier`: `CHG` + 7-10 digits, or 32-hex sys_id | read `change_request` |
 | `search_problems` | `state` (new/assess/root_cause_analysis/fix_in_progress/resolved/closed), `active`, `known_error`, `unassigned`, `priority` 1-5, `urgency` 1-3, `impact` 1-3, `category`, `assignment_group`/`cmdb_ci` (32-hex sys_id), `short_description_contains` (same rules as incidents), `opened_after`/`opened_before`, `order_by`, `descending`, `limit`, `offset` | read `problem` |
+| `search_change_requests` | `state` (new/assess/authorize/scheduled/implement/review/closed/canceled), `active`, `type` (normal/standard/emergency), `priority` 1-5, `category`, `assignment_group`/`cmdb_ci` (32-hex sys_id), `short_description_contains` (same rules as incidents), `opened_after`/`opened_before`, `order_by` (also `start_date`), `descending`, `limit`, `offset` | read `change_request` |
 | `get_problem` | `identifier`: `PRB` + 7-10 digits, or 32-hex sys_id | read `problem`, `incident` |
 
 Write tools take the same strictly validated inputs plus `confirm` (default false = preview only); see the

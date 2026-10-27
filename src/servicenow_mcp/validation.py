@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
-from .config import PROBLEM_STATE_NAMES
+from .config import CHANGE_STATE_NAMES, PROBLEM_STATE_NAMES
 
 SYS_ID_RE = re.compile(r"^[0-9a-f]{32}\Z")
 INCIDENT_NUMBER_RE = re.compile(r"^INC\d{7,10}\Z")
@@ -492,3 +492,186 @@ def build_problem_resolution(
             )
         out["resolution_code"] = resolution_code.strip()
     return out
+
+
+# ---------------------------------------------------------------------------
+# Change management
+# ---------------------------------------------------------------------------
+# Lifecycle phases in forward order. transition_change_request may only move a change to a LATER phase in this
+# list; closing and cancelling have their own tools, and nothing moves a change backwards.
+CHANGE_PHASES = ("new", "assess", "authorize", "scheduled", "implement", "review")
+CHANGE_TRANSITION_TARGETS = CHANGE_PHASES[1:]
+CHANGE_TYPES = ("normal", "standard", "emergency")
+CHANGE_ORDER_FIELDS = {**ORDER_FIELDS, "start_date": "start_date"}
+
+
+@dataclass(frozen=True)
+class ChangeSearch:
+    query: str
+    limit: int
+    offset: int
+
+
+def build_change_search(
+    *,
+    state_map: Mapping[str, str],
+    state: str | None = None,
+    active: bool | None = None,
+    change_type: str | None = None,
+    priority: int | None = None,
+    category: str | None = None,
+    assignment_group: str | None = None,
+    cmdb_ci: str | None = None,
+    short_description_contains: str | None = None,
+    opened_after: str | None = None,
+    opened_before: str | None = None,
+    order_by: str = "opened_at",
+    descending: bool = True,
+    limit: int = 10,
+    offset: int = 0,
+    max_limit: int = 50,
+) -> ChangeSearch:
+    clauses: list[str] = []
+    if state is not None:
+        key = state.strip().lower() if isinstance(state, str) else ""
+        if key not in CHANGE_STATE_NAMES:
+            raise ValidationError(f"state must be one of: {', '.join(CHANGE_STATE_NAMES)}")
+        clauses.append(f"state={state_map[key]}")
+    if active is not None:
+        if not isinstance(active, bool):
+            raise ValidationError("active must be a boolean")
+        clauses.append(f"active={'true' if active else 'false'}")
+    if change_type is not None:
+        key = change_type.strip().lower() if isinstance(change_type, str) else ""
+        if key not in CHANGE_TYPES:
+            raise ValidationError(f"type must be one of: {', '.join(CHANGE_TYPES)}")
+        clauses.append(f"type={key}")
+    if priority is not None:
+        clauses.append(f"priority={_int_in(priority, 'priority', 1, 5)}")
+    if category is not None:
+        category = category.strip()
+        if not _CATEGORY_RE.match(category):
+            raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
+        clauses.append(f"category={category}")
+    for name, val in (("assignment_group", assignment_group), ("cmdb_ci", cmdb_ci)):
+        if val is not None:
+            val = val.strip().lower()
+            if not SYS_ID_RE.match(val):
+                raise ValidationError(f"{name} must be a 32-character hex sys_id")
+            clauses.append(f"{name}={val}")
+    if short_description_contains is not None:
+        clauses.append(
+            f"short_descriptionLIKE{_text(short_description_contains, 'short_description_contains')}"
+        )
+    if opened_after is not None:
+        clauses.append(f"opened_at>={_datetime(opened_after, 'opened_after')}")
+    if opened_before is not None:
+        clauses.append(f"opened_at<={_datetime(opened_before, 'opened_before')}")
+    if order_by not in CHANGE_ORDER_FIELDS:
+        raise ValidationError(f"order_by must be one of: {', '.join(CHANGE_ORDER_FIELDS)}")
+    if not isinstance(descending, bool):
+        raise ValidationError("descending must be a boolean")
+    clauses.append(f"{'ORDERBYDESC' if descending else 'ORDERBY'}{CHANGE_ORDER_FIELDS[order_by]}")
+    return ChangeSearch(
+        query="^".join(clauses),
+        limit=_int_in(limit, "limit", 1, max_limit),
+        offset=_int_in(offset, "offset", 0, 10000),
+    )
+
+
+def build_change_fields(
+    *,
+    allowed_types: tuple[str, ...] = (),
+    short_description: str | None = None,
+    description: str | None = None,
+    change_type: str | None = None,
+    category: str | None = None,
+    impact: int | None = None,
+    cmdb_ci: str | None = None,
+    business_service: str | None = None,
+    assignment_group: str | None = None,
+    justification: str | None = None,
+    implementation_plan: str | None = None,
+    backout_plan: str | None = None,
+    test_plan: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    work_note: str | None = None,
+    comment: str | None = None,
+    require_short_description: bool = False,
+    max_text: int = 4000,
+) -> dict[str, str]:
+    """Validate and translate change inputs to ServiceNow field names/raw values (never the state)."""
+    out: dict[str, str] = {}
+    if short_description is not None:
+        value = validate_text(short_description, "short_description", 160, required=True)
+        if "\n" in value:
+            raise ValidationError("short_description must be a single line")
+        out["short_description"] = value
+    elif require_short_description:
+        raise ValidationError("short_description is required")
+    if change_type is not None:
+        key = change_type.strip().lower() if isinstance(change_type, str) else ""
+        if key not in CHANGE_TYPES:
+            raise ValidationError(f"type must be one of: {', '.join(CHANGE_TYPES)}")
+        if key not in allowed_types:
+            raise ValidationError(
+                "this server only lets agents create changes of type: " + (", ".join(allowed_types) or "(none)")
+            )
+        out["type"] = key
+    for name, val in (
+        ("description", description), ("justification", justification),
+        ("implementation_plan", implementation_plan), ("backout_plan", backout_plan), ("test_plan", test_plan),
+    ):
+        if val is not None:
+            out[name] = validate_text(val, name, max_text)
+    if category is not None:
+        category = category.strip()
+        if not _CATEGORY_RE.match(category):
+            raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
+        out["category"] = category
+    if impact is not None:
+        out["impact"] = str(_int_in(impact, "impact", 1, 3))
+    for name, val in (("cmdb_ci", cmdb_ci), ("business_service", business_service),
+                      ("assignment_group", assignment_group)):
+        if val is not None:
+            out[name] = _sys_id(val, name)
+    if start_date is not None:
+        out["start_date"] = _datetime(start_date, "start_date")
+    if end_date is not None:
+        out["end_date"] = _datetime(end_date, "end_date")
+    if "start_date" in out and "end_date" in out and out["end_date"] < out["start_date"]:
+        raise ValidationError("end_date must not be before start_date")
+    if work_note is not None:
+        out["work_notes"] = validate_text(work_note, "work_note", max_text, required=True)
+    if comment is not None:
+        out["comments"] = validate_text(comment, "comment", max_text, required=True)
+    return out
+
+
+def build_change_transition(target: str, state_map: Mapping[str, str], work_note: str | None = None,
+                            max_text: int = 4000) -> dict[str, str]:
+    key = target.strip().lower() if isinstance(target, str) else ""
+    if key not in CHANGE_TRANSITION_TARGETS:
+        raise ValidationError(
+            f"to_phase must be one of: {', '.join(CHANGE_TRANSITION_TARGETS)} "
+            "(use close_change_request / cancel_change_request to finish a change)"
+        )
+    out = {"state": state_map[key]}
+    if work_note is not None:
+        out["work_notes"] = validate_text(work_note, "work_note", max_text, required=True)
+    return out
+
+
+def build_change_close(close_code: str, close_notes: str, closed_value: str, max_text: int = 4000) -> dict[str, str]:
+    if not isinstance(close_code, str) or not _CLOSE_CODE_RE.match(close_code.strip()):
+        raise ValidationError("close_code must be 1-60 characters: letters, digits, spaces and , / _ ( ) -")
+    return {
+        "state": closed_value,
+        "close_code": close_code.strip(),
+        "close_notes": validate_text(close_notes, "close_notes", max_text, required=True),
+    }
+
+
+def build_change_cancel(reason: str, canceled_value: str, max_text: int = 4000) -> dict[str, str]:
+    return {"state": canceled_value, "work_notes": validate_text(reason, "reason", max_text, required=True)}

@@ -14,8 +14,8 @@ BODY = (SRC / "body.md").read_text(encoding="utf-8")
 DESCRIPTION = (
     "Work with ServiceNow through the servicenow MCP server - look up and search incidents/changes/problems, "
     "triage the unassigned queue, assign incidents to approved teams, create/update/resolve incidents, manage "
-    "problems (root cause, workaround, known errors, linking incidents), approve changes pending for the "
-    "integration account, and review/edit the on-call roster. Writes always preview first and need explicit "
+    "problems (root cause, workaround, known errors, linking incidents), create, progress, close or cancel change requests, "
+    "approve changes pending for the integration account, and review/edit the on-call roster. Writes always preview first and need explicit "
     "user approval."
 )
 

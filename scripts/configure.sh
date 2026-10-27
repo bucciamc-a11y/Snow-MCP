@@ -175,6 +175,24 @@ fi
 if [[ $EN_PRBW == true && -z ${TEAMS:-} ]]; then
   echo "Note: without MCP_ASSIGNMENT_GROUPS (teams) the agent cannot assign problems to a team."
 fi
+yesno "Allow reading change requests (search_change_requests)?" MCP_ENABLE_CHANGE_READ; EN_CHGR=$REPLY
+yesno "Allow change management writes (create / edit changes, move them through phases, close or cancel)?" MCP_ENABLE_CHANGE_WRITES; EN_CHGW=$REPLY
+CHG_STATES="$(existing_value "$CONF" MCP_CHANGE_STATES | grep . || echo "new=-5;assess=-4;authorize=-3;scheduled=-2;implement=-1;review=0;closed=3;canceled=4")"
+CHG_TYPES="$(existing_value "$CONF" MCP_CHANGE_CREATE_TYPES | grep . || echo "normal,standard")"
+if [[ $EN_CHGR == true || $EN_CHGW == true ]]; then
+  echo "Change phase state values differ between ServiceNow releases (current default: new=-5 ... review=0, closed=3, canceled=4)."
+  ask "Change state values (name=value;...)" "$CHG_STATES"; CHG_STATES="$REPLY"
+  chg_re='^[a-z_]+=-?[0-9]{1,4}(;[a-z_]+=-?[0-9]{1,4})*$'
+  [[ $CHG_STATES =~ $chg_re ]] || { echo "Use the form closed=3;canceled=4" >&2; exit 1; }
+fi
+if [[ $EN_CHGW == true ]]; then
+  ask "Change types the agent may create (comma list; emergency is excluded by default)" "$CHG_TYPES"; CHG_TYPES="$REPLY"
+  chgt_re='^[a-z]+(,[a-z]+)*$'
+  [[ $CHG_TYPES =~ $chgt_re ]] || { echo "Use a comma list such as normal,standard" >&2; exit 1; }
+  if [[ -z ${TEAMS:-} ]]; then
+    echo "Note: without MCP_ASSIGNMENT_GROUPS (teams) the agent cannot assign changes to a team."
+  fi
+fi
 # --- write files atomically, owner root, restrictive modes -----------------------
 tmp_conf="$(mktemp "$CONF_DIR/.config.XXXXXX")"
 cat > "$tmp_conf" <<EOF
@@ -201,6 +219,10 @@ MCP_ENABLE_ONCALL_WRITES=$EN_OCW
 MCP_ENABLE_PROBLEM_READ=$EN_PRBR
 MCP_ENABLE_PROBLEM_WRITES=$EN_PRBW
 MCP_PROBLEM_STATES="$PRB_STATES"
+MCP_ENABLE_CHANGE_READ=$EN_CHGR
+MCP_ENABLE_CHANGE_WRITES=$EN_CHGW
+MCP_CHANGE_STATES="$CHG_STATES"
+MCP_CHANGE_CREATE_TYPES="$CHG_TYPES"
 EOF
 chown root:root "$tmp_conf"; chmod 0644 "$tmp_conf"
 
