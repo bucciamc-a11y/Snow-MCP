@@ -1,5 +1,5 @@
 [Unit]
-Description=Read-only ServiceNow MCP server
+Description=ServiceNow MCP server
 Documentation=file:///opt/servicenow-mcp/app/README.md
 After=network-online.target docker.service
 Wants=network-online.target

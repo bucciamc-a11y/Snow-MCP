@@ -1,4 +1,4 @@
-# Read-only ServiceNow MCP server. Contains no secrets: credentials are injected at runtime
+# ServiceNow MCP server. Contains no secrets: credentials are injected at runtime
 # as Docker secrets (files) and settings as environment variables.
 FROM python:3.13-slim-trixie AS build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1

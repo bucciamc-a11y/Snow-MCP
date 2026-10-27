@@ -9,7 +9,7 @@ services:
   servicenow-mcp:
     build:
       context: ..
-    image: servicenow-readonly-mcp:1.0.0
+    image: servicenow-mcp:2.0.0
     container_name: servicenow-mcp
     restart: unless-stopped
     environment:

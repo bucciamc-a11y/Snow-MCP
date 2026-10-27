@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "servicenow-readonly-mcp"
-version = "1.0.0"
-description = "Read-only ServiceNow MCP server (Streamable HTTP, bearer-token protected)"
+name = "servicenow-mcp"
+version = "2.0.0"
+description = "ServiceNow MCP server: read tools plus optional guarded write tools (Streamable HTTP, bearer-token protected)"
 requires-python = ">=3.11"
 dependencies = [
   # Pinned to the 1.x line: the FastMCP API used here is stable there. mcp 2.x changed the

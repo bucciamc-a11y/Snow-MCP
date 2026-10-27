@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DK="$ROOT/docker"
 SEC="$DK/secrets"
 ENVF="$DK/.env"
-IMAGE=servicenow-readonly-mcp:1.0.0
+IMAGE=servicenow-mcp:2.0.0
 COMPOSE=(docker compose -f "$DK/docker-compose.yml" --env-file "$ENVF")
 
 [[ $EUID -eq 0 ]] || { echo "Run as root (needed to set secret-file ownership)" >&2; exit 1; }

@@ -135,4 +135,4 @@ pytest -q        # 346 tests; ServiceNow is mocked, no credentials needed
 ruff check src tests
 ```
 Tests cover validation/injection attempts, config and TLS rules, the ServiceNow client (mock transport),
-bearer auth/throttling/body limits, MCP end-to-end over ASGI, tool-set read-only guard and log redaction.
+bearer auth/throttling/body limits, MCP end-to-end over ASGI, the default tool set (reads only until a write feature is enabled) and log redaction.

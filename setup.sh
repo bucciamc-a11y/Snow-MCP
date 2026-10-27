@@ -4,7 +4,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ $EUID -eq 0 ]] || { echo "Run as root: sudo bash setup.sh" >&2; exit 1; }
 
-echo "ServiceNow read-only MCP server setup"
+echo "ServiceNow MCP server setup"
 echo "  1) Docker container behind your existing Traefik (recommended, portable)"
 echo "  2) systemd service on the host (Traefik routes to a private address)"
 read -r -p "Choose [1]: " mode; mode="${mode:-1}"
