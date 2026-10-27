@@ -1,0 +1,71 @@
+# Run with:  docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+# docker/.env (non-secret) and docker/secrets/* are created by scripts/docker-setup.sh.
+#
+# No ports are published: the container is reachable only on the (private) Traefik network,
+# and Traefik terminates TLS using its own certificate resolver.
+name: servicenow-mcp
+
+services:
+  servicenow-mcp:
+    build:
+      context: ..
+    image: servicenow-readonly-mcp:1.0.0
+    container_name: servicenow-mcp
+    restart: unless-stopped
+    environment:
+      SERVICENOW_INSTANCE_URL: ${SERVICENOW_INSTANCE_URL}
+      SERVICENOW_ALLOW_CUSTOM_DOMAIN: ${SERVICENOW_ALLOW_CUSTOM_DOMAIN:-false}
+      MCP_PUBLIC_HOSTNAME: ${MCP_PUBLIC_HOSTNAME}
+      MCP_BIND_HOST: 0.0.0.0           # inside the container only; nothing is published
+      MCP_BIND_ALL_IN_CONTAINER: "true"
+      MCP_BEHIND_TLS_PROXY: "true"     # server insists on X-Forwarded-Proto: https (Traefik sets it)
+      MCP_BIND_PORT: "8765"
+      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-INFO}
+      MCP_ENABLE_INCIDENT_WRITES: ${MCP_ENABLE_INCIDENT_WRITES:-false}
+      MCP_ENABLE_INCIDENT_ASSIGNMENT: ${MCP_ENABLE_INCIDENT_ASSIGNMENT:-false}
+      MCP_ASSIGNMENT_GROUPS: ${MCP_ASSIGNMENT_GROUPS:-}
+      MCP_ENABLE_CHANGE_APPROVAL: ${MCP_ENABLE_CHANGE_APPROVAL:-false}
+      MCP_APPROVAL_ALLOWED_TYPES: ${MCP_APPROVAL_ALLOWED_TYPES:-standard,normal}
+      MCP_ENABLE_ONCALL_READ: ${MCP_ENABLE_ONCALL_READ:-false}
+      MCP_ENABLE_ONCALL_WRITES: ${MCP_ENABLE_ONCALL_WRITES:-false}
+      MCP_ENABLE_PROBLEM_READ: ${MCP_ENABLE_PROBLEM_READ:-false}
+      MCP_ENABLE_PROBLEM_WRITES: ${MCP_ENABLE_PROBLEM_WRITES:-false}
+      MCP_PROBLEM_STATES: ${MCP_PROBLEM_STATES:-}
+      SERVICENOW_USERNAME_FILE: /run/secrets/servicenow_username
+      SERVICENOW_PASSWORD_FILE: /run/secrets/servicenow_password
+      MCP_AUTH_TOKEN_SHA256_FILE: /run/secrets/mcp_auth_token_sha256
+    secrets:
+      - servicenow_username
+      - servicenow_password
+      - mcp_auth_token_sha256
+    networks: [traefik]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK}
+      traefik.http.routers.servicenow-mcp.rule: Host(`${MCP_PUBLIC_HOSTNAME}`) && Path(`/mcp`)
+      traefik.http.routers.servicenow-mcp.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.servicenow-mcp.tls: "true"
+      traefik.http.routers.servicenow-mcp.tls.certresolver: ${TRAEFIK_CERTRESOLVER}
+      traefik.http.services.servicenow-mcp.loadbalancer.server.port: "8765"
+      traefik.http.middlewares.servicenow-mcp-limit.buffering.maxrequestbodybytes: "131072"
+      traefik.http.routers.servicenow-mcp.middlewares: servicenow-mcp-limit
+    # --- hardening ---
+    read_only: true
+    tmpfs: [/tmp:size=16m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+
+secrets:
+  servicenow_username: {file: ./secrets/servicenow_username}
+  servicenow_password: {file: ./secrets/servicenow_password}
+  mcp_auth_token_sha256: {file: ./secrets/mcp_auth_token_sha256}
+
+networks:
+  traefik:
+    name: ${TRAEFIK_NETWORK}
+    external: true

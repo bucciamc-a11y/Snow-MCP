@@ -1,0 +1,57 @@
+[Unit]
+Description=Read-only ServiceNow MCP server
+Documentation=file:///opt/servicenow-mcp/app/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+# Refuse to start with missing configuration.
+ConditionPathExists=/etc/servicenow-mcp/config.env
+ConditionPathExists=/etc/servicenow-mcp/secrets.env
+
+[Service]
+Type=simple
+User=servicenow-mcp
+Group=servicenow-mcp
+# Both files are read by systemd (as root) before privileges are dropped, so the
+# secrets file can stay root:root 0600 and unreadable by the service account.
+EnvironmentFile=/etc/servicenow-mcp/config.env
+EnvironmentFile=/etc/servicenow-mcp/secrets.env
+ExecStart=/opt/servicenow-mcp/venv/bin/python -I -m servicenow_mcp.server
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+# --- sandboxing ---
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+
+# --- resource limits ---
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

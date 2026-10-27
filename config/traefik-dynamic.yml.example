@@ -1,0 +1,26 @@
+# Only needed for the systemd (non-Docker) deployment. For the Docker deployment the compose
+# file carries Traefik labels and none of this is required.
+#
+# Save in the directory Traefik's *file provider* watches (e.g. /etc/traefik/dynamic/).
+# Adjust: certResolver name, entryPoints name, and the server URL (the address you gave
+# configure.sh: 127.0.0.1 only works if Traefik uses host networking; otherwise use the
+# Docker network gateway, e.g. http://172.18.0.1:8765, and allow it in the host firewall).
+http:
+  routers:
+    servicenow-mcp:
+      rule: "Host(`mcp.example.com`) && Path(`/mcp`)"
+      entryPoints: [websecure]
+      tls:
+        certResolver: letsencrypt
+      service: servicenow-mcp
+      middlewares: [servicenow-mcp-limit]
+  middlewares:
+    servicenow-mcp-limit:
+      buffering:
+        maxRequestBodyBytes: 131072
+  services:
+    servicenow-mcp:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://172.17.0.1:8765"

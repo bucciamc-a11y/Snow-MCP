@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "servicenow-readonly-mcp"
+version = "1.0.0"
+description = "Read-only ServiceNow MCP server (Streamable HTTP, bearer-token protected)"
+requires-python = ">=3.11"
+dependencies = [
+  # Pinned to the 1.x line: the FastMCP API used here is stable there. mcp 2.x changed the
+  # server API (MCPServer); see README "Compatibility".
+  "mcp>=1.27,<2",
+  "httpx>=0.27,<1",
+  "uvicorn>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+servicenow-mcp = "servicenow_mcp.server:main"
+servicenow-mcp-cli = "servicenow_mcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

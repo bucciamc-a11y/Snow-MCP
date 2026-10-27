@@ -1,0 +1,23 @@
+# /etc/caddy/Caddyfile  (Caddy obtains and renews a Let's Encrypt certificate automatically;
+# ports 80 and 443 must be reachable from the internet for the ACME challenge.)
+mcp.example.com {
+	encode zstd gzip
+	# Only the MCP endpoint and health check are proxied.
+	@mcp path /mcp /healthz
+	handle @mcp {
+		reverse_proxy 127.0.0.1:8765 {
+			# Caddy sets X-Forwarded-Proto/For automatically; the server requires
+			# X-Forwarded-Proto: https when MCP_BEHIND_TLS_PROXY=true.
+			transport http {
+				response_header_timeout 60s
+			}
+		}
+	}
+	handle {
+		respond 404
+	}
+	request_body {
+		max_size 128KB
+	}
+	header -Server
+}
