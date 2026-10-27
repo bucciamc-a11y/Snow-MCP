@@ -101,7 +101,6 @@ Hermes ──HTTPS + Authorization: Bearer <MCP token>──▶ Traefik (TLS, yo
 | [INSTALL.md](INSTALL.md) | Quick start, the ServiceNow account and permissions you must create, Docker and systemd install, verification, operations, troubleshooting, uninstall |
 | [docs/TOOLS.md](docs/TOOLS.md) | Per-tool inputs and validation rules, fields returned |
 | [skills/](skills/README.md) | Skills for Claude Desktop, OpenClaw, Paperclip, ChatGPT Desktop, Hermes and a generic one for any client |
-| [fixes.md](fixes.md) | Issues found while building and testing, how each was fixed, known gaps |
 
 ## Quick start
 
