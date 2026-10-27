@@ -1,4 +1,4 @@
-# OpenClaw
+# Setup: OpenClaw
 
 ## 1. Install the skill
 

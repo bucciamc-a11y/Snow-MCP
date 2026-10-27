@@ -41,7 +41,7 @@ PAPERCLIP_FRONT = f"---\nname: servicenow\nslug: servicenow\ndescription: {DESCR
 CHATGPT_HEAD = """# ServiceNow assistant instructions
 
 Paste these into the instructions of a ChatGPT Project or custom GPT that has the ServiceNow MCP server
-connected (see README.md in this folder for what is and is not possible with ChatGPT).
+connected (see SETUP.md in this folder for what is and is not possible with ChatGPT).
 
 """
 
@@ -59,6 +59,11 @@ NAMING = {
                "the tool list shows.",
 }
 
+SETUP_NOTE = (
+    "\n\n## Setup\n\nInstall and connection steps for this client are in `SETUP.md` next to this file "
+    "(the MCP server URL and token are configured in the client, never in this skill).\n"
+)
+
 APPROVAL_NOTE = (
     "\n\nKeep the client's own tool-approval prompt enabled for write tools; a human must approve every write call.\n"
 )
@@ -75,7 +80,8 @@ def render(kind: str) -> str:
     if front is None:  # chatgpt
         return CHATGPT_HEAD + body.rstrip("\n") + APPROVAL_NOTE
     head, _, tail = body.partition("\n## Failures")
-    return front + "\n" + head.rstrip("\n") + APPROVAL_NOTE.rstrip("\n") + "\n\n## Failures" + tail
+    return (front + "\n" + head.rstrip("\n") + "\n\n## Failures" + tail.rstrip("\n") + "\n"
+            + APPROVAL_NOTE.rstrip("\n") + SETUP_NOTE)
 
 
 OUTPUTS = {

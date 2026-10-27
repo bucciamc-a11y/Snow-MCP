@@ -1,4 +1,4 @@
-# Hermes skill: servicenow
+# Setup: Hermes
 
 Kept separate from the server code. Format: `SKILL.md` with YAML frontmatter (`name`, `description`,
 `version`, `required_environment_variables`, `metadata.hermes.{tags,category}`), per the Hermes skills
@@ -9,7 +9,7 @@ documentation (agentskills.io-style). The format follows the public Hermes docum
 
 ```bash
 mkdir -p ~/.hermes/skills/devops
-cp -r servicenow ~/.hermes/skills/devops/
+cp -r skills/hermes/servicenow ~/.hermes/skills/devops/   # run from the repository root
 ```
 Alternatively add this directory's parent to `skills.external_dirs` in `~/.hermes/config.yaml`, or
 `hermes skills install <path-or-url-to-SKILL.md> --name servicenow` if your version supports it.

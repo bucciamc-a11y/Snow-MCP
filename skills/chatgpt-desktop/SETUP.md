@@ -1,4 +1,4 @@
-# ChatGPT Desktop
+# Setup: ChatGPT Desktop
 
 ChatGPT has no skill format like the others, so this folder holds plain **instructions**
 (`instructions.md`) to paste into the instructions of a Project or a custom GPT.

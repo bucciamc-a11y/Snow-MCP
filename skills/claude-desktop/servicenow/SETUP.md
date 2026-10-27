@@ -1,4 +1,4 @@
-# Claude Desktop
+# Setup: Claude Desktop
 
 Two separate pieces: the **skill** (instructions) and the **connection** to the MCP server (the tools).
 
@@ -8,7 +8,7 @@ Zip the `servicenow` folder so the folder itself is at the top of the zip, then 
 settings (Settings > Customize > Skills > upload; menu names vary by version):
 
 ```bash
-cd skills/claude-desktop && zip -r servicenow.zip servicenow
+cd skills/claude-desktop && zip -r servicenow.zip servicenow   # run from the repository root
 ```
 
 ## 2. Connect the MCP server

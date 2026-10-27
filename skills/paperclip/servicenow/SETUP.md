@@ -1,4 +1,4 @@
-# Paperclip
+# Setup: Paperclip
 
 Paperclip does not run MCP itself: tools come from the **runtime adapter** an agent uses (Claude Code or Hermes),
 and the skill is a Paperclip company skill. So there are three steps.

@@ -1,9 +1,9 @@
-# Generic skill (any client)
+# Setup: any SKILL.md client (generic)
 
 `servicenow/SKILL.md` uses only the two fields every `SKILL.md`-style client understands (`name` and
 `description`) and contains no client-specific setup, so it can be imported anywhere that loads a folder with a
 `SKILL.md`: Claude (Desktop, Code, claude.ai), OpenClaw, Hermes, Paperclip, Codex-style CLIs and others. Use the
-client-specific folders in `skills/` when you want the connection steps and that client's extra metadata.
+client-specific folders in `skills/` (each has its own `SETUP.md`) when you want the connection steps and that client's extra metadata.
 
 ## Use
 

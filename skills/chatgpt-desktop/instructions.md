@@ -1,7 +1,7 @@
 # ServiceNow assistant instructions
 
 Paste these into the instructions of a ChatGPT Project or custom GPT that has the ServiceNow MCP server
-connected (see README.md in this folder for what is and is not possible with ChatGPT).
+connected (see SETUP.md in this folder for what is and is not possible with ChatGPT).
 
 # ServiceNow
 

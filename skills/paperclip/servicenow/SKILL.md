@@ -81,8 +81,6 @@ Start narrow (`active`, `state`/`priority`, `limit` ~10), page with `offset = ne
 can answer. Dates are UTC. The text filter allows letters, digits, spaces and `. , : ; / @ # ( ) + _ -`.
 `assignment_group`/`caller_id` filters need sys_ids. "Not found" can also mean the account lacks permission.
 
-Keep the client's own tool-approval prompt enabled for write tools; a human must approve every write call.
-
 ## Failures (never expose secrets)
 
 | What you see | What to do |
@@ -98,3 +96,10 @@ Keep the client's own tool-approval prompt enabled for write tools; a human must
 | Connection refused / TLS errors | Server down or certificate issue; suggest testing the connection from the client and checking the server's logs |
 
 Never print, log or request the token, ServiceNow credentials or Authorization headers.
+
+
+Keep the client's own tool-approval prompt enabled for write tools; a human must approve every write call.
+
+## Setup
+
+Install and connection steps for this client are in `SETUP.md` next to this file (the MCP server URL and token are configured in the client, never in this skill).
