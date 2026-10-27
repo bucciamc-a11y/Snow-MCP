@@ -31,9 +31,7 @@ from .validation import (
     CHANGE_NUMBER_RE,
     INCIDENT_NUMBER_RE,
     PROBLEM_NUMBER_RE,
-    ChangeSearch,
-    IncidentSearch,
-    ProblemSearch,
+    Search,
     validate_identifier,
     validate_sys_id,
 )
@@ -156,6 +154,12 @@ def _clean(record: dict[str, Any], max_text: int) -> dict[str, Any]:
             value = value[:max_text] + "…[truncated]"
         out["updated_at" if key == "sys_updated_on" else key] = value
     return out
+
+
+def _next_offset(offset: int, count: int, total: int | None, limit: int) -> int | None:
+    """Offset of the next page, or None on the last page (without a total, a full page implies more)."""
+    more = offset + count < total if total is not None else count == limit
+    return offset + count if more else None
 
 
 def _safe_detail(body: bytes) -> str:
@@ -347,20 +351,41 @@ class ServiceNowClient:
             raise ServiceNowError("unexpected response shape from ServiceNow", code="bad_response")
         return [_clean(r, self._max_text) for r in rows if isinstance(r, dict)], total
 
-    # -- incident / change reads -----------------------------------------------
-    async def search_incidents(self, search: IncidentSearch) -> dict[str, Any]:
-        records, total = await self._list("incident", search.query, INCIDENT_FIELDS, search.limit, search.offset)
-        next_offset = None
-        more = search.offset + len(records) < total if total is not None else len(records) == search.limit
-        if more:
-            next_offset = search.offset + len(records)
+    # -- shared helpers for the incident / problem / change tables -------------------------------------------
+    async def _search(self, table: str, key: str, search: Search) -> dict[str, Any]:
+        records, total = await self._list(table, search.query, _TABLES[table][1], search.limit, search.offset)
         return {
             "count": len(records),
             "total_count": total,
             "offset": search.offset,
-            "next_offset": next_offset,
-            "incidents": records,
+            "next_offset": _next_offset(search.offset, len(records), total, search.limit),
+            key: records,
         }
+
+    async def _get_raw(self, table: str, identifier: str, fields: str) -> dict[str, str]:
+        """Raw (non-display) values, used for write guards that must not depend on locale."""
+        _, _, number_re, label = _TABLES[table]
+        kind, value = validate_identifier(identifier, number_re, label.split()[0])
+        params = {"sysparm_fields": fields, "sysparm_display_value": "false",
+                  "sysparm_exclude_reference_link": "true"}
+        if kind == "sys_id":
+            data, _ = await self._request("GET", table, sys_id=value, params=params)
+            result = data["result"]
+        else:
+            params.update({"sysparm_query": f"number={value}", "sysparm_limit": "1"})
+            data, _ = await self._request("GET", table, params=params)
+            rows = data["result"]
+            result = rows[0] if isinstance(rows, list) and rows else None
+        if not isinstance(result, dict) or not result.get("sys_id"):
+            raise NotFoundError
+        flat = {k: (v.get("value") if isinstance(v, dict) else v) for k, v in result.items()}
+        return {k: str(v) for k, v in flat.items() if v is not None}
+
+    async def _write(self, method: str, table: str, fields: dict[str, str], return_fields: str,
+                     sys_id: str | None = None) -> dict[str, Any]:
+        data, _ = await self._request(method, table, sys_id=sys_id, params=self._display_params(return_fields),
+                                      body=fields)
+        return self._one(data)
 
     async def get_record(self, table: str, identifier: str) -> dict[str, Any]:
         _, fields, number_re, label = _TABLES[table]
@@ -373,54 +398,26 @@ class ServiceNowClient:
             raise NotFoundError
         return rows[0]
 
-    async def get_incident_raw(self, identifier: str) -> dict[str, str]:
-        """Raw (non-display) sys_id/number/state, used for write guards that must not depend on locale."""
-        kind, value = validate_identifier(identifier, INCIDENT_NUMBER_RE, "incident")
-        params = {"sysparm_fields": "sys_id,number,state,assignment_group,problem_id",
-                  "sysparm_display_value": "false",
-                  "sysparm_exclude_reference_link": "true"}
-        if kind == "sys_id":
-            data, _ = await self._request("GET", "incident", sys_id=value, params=params)
-            result = data["result"]
-        else:
-            params.update({"sysparm_query": f"number={value}", "sysparm_limit": "1"})
-            data, _ = await self._request("GET", "incident", params=params)
-            rows = data["result"]
-            result = rows[0] if isinstance(rows, list) and rows else None
-        if not isinstance(result, dict) or not result.get("sys_id"):
-            raise NotFoundError
-        flat = {k: (v.get("value") if isinstance(v, dict) else v) for k, v in result.items()}
-        return {k: str(v) for k, v in flat.items() if v is not None}
+    # -- incident ----------------------------------------------------------------
+    async def search_incidents(self, search: Search) -> dict[str, Any]:
+        return await self._search("incident", "incidents", search)
 
-    # -- problem reads ---------------------------------------------------------
-    async def search_problems(self, search: ProblemSearch) -> dict[str, Any]:
-        records, total = await self._list("problem", search.query, PROBLEM_FIELDS, search.limit, search.offset)
-        more = search.offset + len(records) < total if total is not None else len(records) == search.limit
-        return {
-            "count": len(records),
-            "total_count": total,
-            "offset": search.offset,
-            "next_offset": search.offset + len(records) if more else None,
-            "problems": records,
-        }
+    async def get_incident_raw(self, identifier: str) -> dict[str, str]:
+        return await self._get_raw("incident", identifier, "sys_id,number,state,assignment_group,problem_id")
+
+    async def create_incident(self, fields: dict[str, str]) -> dict[str, Any]:
+        return await self._write("POST", "incident", fields, INCIDENT_FIELDS)
+
+    async def update_incident(self, sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
+        validate_sys_id(sys_id, "sys_id")
+        return await self._write("PATCH", "incident", fields, INCIDENT_FIELDS, sys_id)
+
+    # -- problem -----------------------------------------------------------------
+    async def search_problems(self, search: Search) -> dict[str, Any]:
+        return await self._search("problem", "problems", search)
 
     async def get_problem_raw(self, identifier: str) -> dict[str, str]:
-        """Raw (non-display) sys_id/number/state, used for write guards that must not depend on locale."""
-        kind, value = validate_identifier(identifier, PROBLEM_NUMBER_RE, "problem")
-        params = {"sysparm_fields": "sys_id,number,state,assignment_group", "sysparm_display_value": "false",
-                  "sysparm_exclude_reference_link": "true"}
-        if kind == "sys_id":
-            data, _ = await self._request("GET", "problem", sys_id=value, params=params)
-            result = data["result"]
-        else:
-            params.update({"sysparm_query": f"number={value}", "sysparm_limit": "1"})
-            data, _ = await self._request("GET", "problem", params=params)
-            rows = data["result"]
-            result = rows[0] if isinstance(rows, list) and rows else None
-        if not isinstance(result, dict) or not result.get("sys_id"):
-            raise NotFoundError
-        flat = {k: (v.get("value") if isinstance(v, dict) else v) for k, v in result.items()}
-        return {k: str(v) for k, v in flat.items() if v is not None}
+        return await self._get_raw("problem", identifier, "sys_id,number,state,assignment_group")
 
     async def linked_incidents(self, problem_sys_id: str, limit: int = 25) -> dict[str, Any]:
         """Incidents whose ``problem_id`` points at this problem (newest first)."""
@@ -430,71 +427,26 @@ class ServiceNowClient:
         )
         return {"count": len(rows), "total_count": total, "incidents": rows}
 
-    # -- problem writes --------------------------------------------------------
     async def create_problem(self, fields: dict[str, str]) -> dict[str, Any]:
-        data, _ = await self._request("POST", "problem", params=self._display_params(PROBLEM_FIELDS), body=fields)
-        return self._one(data)
+        return await self._write("POST", "problem", fields, PROBLEM_FIELDS)
 
     async def update_problem(self, sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
         validate_sys_id(sys_id, "sys_id")
-        data, _ = await self._request(
-            "PATCH", "problem", sys_id=sys_id, params=self._display_params(PROBLEM_FIELDS), body=fields
-        )
-        return self._one(data)
+        return await self._write("PATCH", "problem", fields, PROBLEM_FIELDS, sys_id)
 
-    # -- change reads / writes ---------------------------------------------------
-    async def search_change_requests(self, search: ChangeSearch) -> dict[str, Any]:
-        records, total = await self._list("change_request", search.query, CHANGE_FIELDS, search.limit, search.offset)
-        more = search.offset + len(records) < total if total is not None else len(records) == search.limit
-        return {
-            "count": len(records),
-            "total_count": total,
-            "offset": search.offset,
-            "next_offset": search.offset + len(records) if more else None,
-            "change_requests": records,
-        }
+    # -- change request ------------------------------------------------------------
+    async def search_change_requests(self, search: Search) -> dict[str, Any]:
+        return await self._search("change_request", "change_requests", search)
 
     async def get_change_raw(self, identifier: str) -> dict[str, str]:
-        """Raw (non-display) sys_id/number/state/type, used for write guards that must not depend on locale."""
-        kind, value = validate_identifier(identifier, CHANGE_NUMBER_RE, "change")
-        params = {"sysparm_fields": "sys_id,number,state,type,approval", "sysparm_display_value": "false",
-                  "sysparm_exclude_reference_link": "true"}
-        if kind == "sys_id":
-            data, _ = await self._request("GET", "change_request", sys_id=value, params=params)
-            result = data["result"]
-        else:
-            params.update({"sysparm_query": f"number={value}", "sysparm_limit": "1"})
-            data, _ = await self._request("GET", "change_request", params=params)
-            rows = data["result"]
-            result = rows[0] if isinstance(rows, list) and rows else None
-        if not isinstance(result, dict) or not result.get("sys_id"):
-            raise NotFoundError
-        flat = {k: (v.get("value") if isinstance(v, dict) else v) for k, v in result.items()}
-        return {k: str(v) for k, v in flat.items() if v is not None}
+        return await self._get_raw("change_request", identifier, "sys_id,number,state,type,approval")
 
     async def create_change(self, fields: dict[str, str]) -> dict[str, Any]:
-        data, _ = await self._request("POST", "change_request", params=self._display_params(CHANGE_FIELDS),
-                                      body=fields)
-        return self._one(data)
+        return await self._write("POST", "change_request", fields, CHANGE_FIELDS)
 
     async def update_change(self, sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
         validate_sys_id(sys_id, "sys_id")
-        data, _ = await self._request(
-            "PATCH", "change_request", sys_id=sys_id, params=self._display_params(CHANGE_FIELDS), body=fields
-        )
-        return self._one(data)
-
-    # -- incident writes -------------------------------------------------------
-    async def create_incident(self, fields: dict[str, str]) -> dict[str, Any]:
-        data, _ = await self._request("POST", "incident", params=self._display_params(INCIDENT_FIELDS), body=fields)
-        return self._one(data)
-
-    async def update_incident(self, sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
-        validate_sys_id(sys_id, "sys_id")
-        data, _ = await self._request(
-            "PATCH", "incident", sys_id=sys_id, params=self._display_params(INCIDENT_FIELDS), body=fields
-        )
-        return self._one(data)
+        return await self._write("PATCH", "change_request", fields, CHANGE_FIELDS, sys_id)
 
     # -- change approval ---------------------------------------------------------
     async def find_approval_ids(self, change_sys_id: str, username: str) -> list[str]:
@@ -527,19 +479,15 @@ class ServiceNowClient:
     # -- on-call -----------------------------------------------------------------
     async def list_rotas(self, query: str, limit: int, offset: int) -> dict[str, Any]:
         rows, total = await self._list("cmn_rota", query, ROTA_FIELDS, limit, offset)
-        more = offset + len(rows) < total if total is not None else len(rows) == limit
-        return {"count": len(rows), "total_count": total, "next_offset": offset + len(rows) if more else None,
+        return {"count": len(rows), "total_count": total, "next_offset": _next_offset(offset, len(rows), total, limit),
                 "rotas": rows}
 
     async def get_roster(self, rota_sys_id: str) -> dict[str, Any]:
         validate_sys_id(rota_sys_id, "rota_id")
         rosters, _ = await self._list("cmn_rota_roster", f"rota={rota_sys_id}^ORDERBYorder", ROSTER_FIELDS, 50)
-        members: list[dict[str, Any]] = []
-        for roster in rosters:
-            rid = roster.get("sys_id")
-            if rid:
-                rows, _ = await self._list("cmn_rota_member", f"roster={rid}^ORDERBYorder", MEMBER_FIELDS, 100)
-                members.extend(rows)
+        lookups = [self._list("cmn_rota_member", f"roster={r['sys_id']}^ORDERBYorder", MEMBER_FIELDS, 100)
+                   for r in rosters if r.get("sys_id")]
+        members = [m for rows, _ in await asyncio.gather(*lookups) for m in rows]  # order follows the rosters
         return {"rosters": rosters, "members": members, "count": len(members)}
 
     async def get_member(self, member_sys_id: str) -> dict[str, Any]:
@@ -556,14 +504,11 @@ class ServiceNowClient:
         return {"oncall": [_clean(i, self._max_text) for i in items if isinstance(i, dict)]}
 
     async def create_member(self, fields: dict[str, str]) -> dict[str, Any]:
-        data, _ = await self._request("POST", "cmn_rota_member", params=self._display_params(MEMBER_FIELDS), body=fields)
-        return self._one(data)
+        return await self._write("POST", "cmn_rota_member", fields, MEMBER_FIELDS)
 
     async def update_member(self, member_sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
         validate_sys_id(member_sys_id, "member_record_id")
-        data, _ = await self._request("PATCH", "cmn_rota_member", sys_id=member_sys_id,
-                                      params=self._display_params(MEMBER_FIELDS), body=fields)
-        return self._one(data)
+        return await self._write("PATCH", "cmn_rota_member", fields, MEMBER_FIELDS, member_sys_id)
 
     # -- connectivity check ------------------------------------------------------
     async def check_connectivity(self, tables: tuple[str, ...] = ("incident", "change_request")) -> dict[str, str]:

@@ -13,8 +13,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
-from .config import CHANGE_STATE_NAMES, PROBLEM_STATE_NAMES
-
 SYS_ID_RE = re.compile(r"^[0-9a-f]{32}\Z")
 INCIDENT_NUMBER_RE = re.compile(r"^INC\d{7,10}\Z")
 CHANGE_NUMBER_RE = re.compile(r"^CHG\d{7,10}\Z")
@@ -94,10 +92,67 @@ def _int_in(value: int, name: str, lo: int, hi: int) -> int:
 
 
 @dataclass(frozen=True)
-class IncidentSearch:
+class Search:
+    """A validated encoded query plus its page window (shared by incident, problem and change searches)."""
+
     query: str
     limit: int
     offset: int
+
+
+_RATING_MAX = {"priority": 5, "urgency": 3, "impact": 3}
+
+
+def _state_value(state: str, states: Mapping[str, str]) -> str:
+    key = state.strip().lower() if isinstance(state, str) else ""
+    if key not in states:
+        raise ValidationError(f"state must be one of: {', '.join(states)}")
+    return states[key]
+
+
+def _flag(value: bool, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValidationError(f"{name} must be a boolean")
+    return value
+
+
+def _bool_clause(name: str, value: bool) -> str:
+    return f"{name}={'true' if _flag(value, name) else 'false'}"
+
+
+def _rating_clauses(**ratings: int | None) -> list[str]:
+    return [f"{name}={_int_in(value, name, 1, _RATING_MAX[name])}" for name, value in ratings.items()
+            if value is not None]
+
+
+def _category(value: str, name: str = "category") -> str:
+    value = value.strip()
+    if not _CATEGORY_RE.match(value):
+        raise ValidationError(f"{name} must be 1-40 letters, digits, spaces, _ or -")
+    return value
+
+
+def _sys_id_clauses(**refs: str | None) -> list[str]:
+    return [f"{name}={_sys_id(value, name)}" for name, value in refs.items() if value is not None]
+
+
+def _text_and_date_clauses(contains: str | None, opened_after: str | None, opened_before: str | None) -> list[str]:
+    clauses = []
+    if contains is not None:
+        clauses.append(f"short_descriptionLIKE{_text(contains, 'short_description_contains')}")
+    if opened_after is not None:
+        clauses.append(f"opened_at>={_datetime(opened_after, 'opened_after')}")
+    if opened_before is not None:
+        clauses.append(f"opened_at<={_datetime(opened_before, 'opened_before')}")
+    return clauses
+
+
+def _finish_search(clauses: list[str], order_fields: Mapping[str, str], order_by: str, descending: bool,
+                   limit: int, offset: int, max_limit: int) -> Search:
+    if order_by not in order_fields:
+        raise ValidationError(f"order_by must be one of: {', '.join(order_fields)}")
+    clauses.append(f"{'ORDERBYDESC' if _flag(descending, 'descending') else 'ORDERBY'}{order_fields[order_by]}")
+    return Search("^".join(clauses), _int_in(limit, "limit", 1, max_limit), _int_in(offset, "offset", 0, 10000))
 
 
 def build_incident_search(
@@ -119,57 +174,20 @@ def build_incident_search(
     limit: int = 10,
     offset: int = 0,
     max_limit: int = 50,
-) -> IncidentSearch:
+) -> Search:
     clauses: list[str] = []
-
     if state is not None:
-        key = state.strip().lower()
-        if key not in INCIDENT_STATES:
-            raise ValidationError(f"state must be one of: {', '.join(INCIDENT_STATES)}")
-        clauses.append(f"state={INCIDENT_STATES[key]}")
+        clauses.append(f"state={_state_value(state, INCIDENT_STATES)}")
     if active is not None:
-        if not isinstance(active, bool):
-            raise ValidationError("active must be a boolean")
-        clauses.append(f"active={'true' if active else 'false'}")
-    for name, val in (("priority", priority), ("urgency", urgency), ("impact", impact)):
-        if val is not None:
-            clauses.append(f"{name}={_int_in(val, name, 1, 5 if name == 'priority' else 3)}")
+        clauses.append(_bool_clause("active", active))
+    clauses += _rating_clauses(priority=priority, urgency=urgency, impact=impact)
     if category is not None:
-        category = category.strip()
-        if not _CATEGORY_RE.match(category):
-            raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
-        clauses.append(f"category={category}")
-    for name, ref in (("assignment_group", assignment_group), ("caller_id", caller_id)):
-        if ref is not None:
-            sys_id = ref.strip().lower()
-            if not SYS_ID_RE.match(sys_id):
-                raise ValidationError(f"{name} must be a 32-character hex sys_id")
-            clauses.append(f"{name}={sys_id}")
+        clauses.append(f"category={_category(category)}")
+    clauses += _sys_id_clauses(assignment_group=assignment_group, caller_id=caller_id)
     if unassigned is not None:
-        if not isinstance(unassigned, bool):
-            raise ValidationError("unassigned must be a boolean")
-        clauses.append("assignment_groupISEMPTY" if unassigned else "assignment_groupISNOTEMPTY")
-    if short_description_contains is not None:
-        clauses.append(
-            f"short_descriptionLIKE{_text(short_description_contains, 'short_description_contains')}"
-        )
-    if opened_after is not None:
-        clauses.append(f"opened_at>={_datetime(opened_after, 'opened_after')}")
-    if opened_before is not None:
-        clauses.append(f"opened_at<={_datetime(opened_before, 'opened_before')}")
-
-    if order_by not in ORDER_FIELDS:
-        raise ValidationError(f"order_by must be one of: {', '.join(ORDER_FIELDS)}")
-    if not isinstance(descending, bool):
-        raise ValidationError("descending must be a boolean")
-    clauses.append(f"{'ORDERBYDESC' if descending else 'ORDERBY'}{ORDER_FIELDS[order_by]}")
-
-    return IncidentSearch(
-        query="^".join(clauses),
-        limit=_int_in(limit, "limit", 1, max_limit),
-        offset=_int_in(offset, "offset", 0, 10000),
-    )
-
+        clauses.append("assignment_groupISEMPTY" if _flag(unassigned, "unassigned") else "assignment_groupISNOTEMPTY")
+    clauses += _text_and_date_clauses(short_description_contains, opened_after, opened_before)
+    return _finish_search(clauses, ORDER_FIELDS, order_by, descending, limit, offset, max_limit)
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +215,13 @@ def validate_text(value: str, name: str, max_len: int, *, required: bool = False
         raise ValidationError(f"{name} must be at most {max_len} characters")
     if _CTL_RE.search(text):
         raise ValidationError(f"{name} contains control characters")
+    return text
+
+
+def _short_description(value: str) -> str:
+    text = validate_text(value, "short_description", 160, required=True)
+    if "\n" in text:
+        raise ValidationError("short_description must be a single line")
     return text
 
 
@@ -232,20 +257,14 @@ def build_incident_fields(
     """Validate and translate incident inputs to ServiceNow field names/raw values."""
     out: dict[str, str] = {}
     if short_description is not None:
-        value = validate_text(short_description, "short_description", 160, required=True)
-        if "\n" in value:
-            raise ValidationError("short_description must be a single line")
-        out["short_description"] = value
+        out["short_description"] = _short_description(short_description)
     elif require_short_description:
         raise ValidationError("short_description is required")
     if description is not None:
         out["description"] = validate_text(description, "description", max_text)
     for name, label in (("category", category), ("subcategory", subcategory)):
         if label is not None:
-            label = label.strip()
-            if not _CATEGORY_RE.match(label):
-                raise ValidationError(f"{name} must be 1-40 letters, digits, spaces, _ or -")
-            out[name] = label
+            out[name] = _category(label, name)
     for name, val in (("urgency", urgency), ("impact", impact)):
         if val is not None:
             out[name] = str(_int_in(val, name, 1, 3))
@@ -325,13 +344,6 @@ def build_oncall_member_fields(
 PROBLEM_UPDATE_STATES = ("assess", "root_cause_analysis", "fix_in_progress")
 
 
-@dataclass(frozen=True)
-class ProblemSearch:
-    query: str
-    limit: int
-    offset: int
-
-
 def build_problem_search(
     *,
     state_map: Mapping[str, str],
@@ -353,57 +365,22 @@ def build_problem_search(
     limit: int = 10,
     offset: int = 0,
     max_limit: int = 50,
-) -> ProblemSearch:
+) -> Search:
     clauses: list[str] = []
-
     if state is not None:
-        key = state.strip().lower() if isinstance(state, str) else ""
-        if key not in PROBLEM_STATE_NAMES:
-            raise ValidationError(f"state must be one of: {', '.join(PROBLEM_STATE_NAMES)}")
-        clauses.append(f"state={state_map[key]}")
-    for name, flag in (("active", active), ("known_error", known_error)):
-        if flag is not None:
-            if not isinstance(flag, bool):
-                raise ValidationError(f"{name} must be a boolean")
-            clauses.append(f"{name}={'true' if flag else 'false'}")
-    for name, val in (("priority", priority), ("urgency", urgency), ("impact", impact)):
-        if val is not None:
-            clauses.append(f"{name}={_int_in(val, name, 1, 5 if name == 'priority' else 3)}")
+        clauses.append(f"state={_state_value(state, state_map)}")
+    if active is not None:
+        clauses.append(_bool_clause("active", active))
+    if known_error is not None:
+        clauses.append(_bool_clause("known_error", known_error))
+    clauses += _rating_clauses(priority=priority, urgency=urgency, impact=impact)
     if category is not None:
-        category = category.strip()
-        if not _CATEGORY_RE.match(category):
-            raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
-        clauses.append(f"category={category}")
-    for name, ref in (("assignment_group", assignment_group), ("cmdb_ci", cmdb_ci)):
-        if ref is not None:
-            sys_id = ref.strip().lower()
-            if not SYS_ID_RE.match(sys_id):
-                raise ValidationError(f"{name} must be a 32-character hex sys_id")
-            clauses.append(f"{name}={sys_id}")
+        clauses.append(f"category={_category(category)}")
+    clauses += _sys_id_clauses(assignment_group=assignment_group, cmdb_ci=cmdb_ci)
     if unassigned is not None:
-        if not isinstance(unassigned, bool):
-            raise ValidationError("unassigned must be a boolean")
-        clauses.append("assignment_groupISEMPTY" if unassigned else "assignment_groupISNOTEMPTY")
-    if short_description_contains is not None:
-        clauses.append(
-            f"short_descriptionLIKE{_text(short_description_contains, 'short_description_contains')}"
-        )
-    if opened_after is not None:
-        clauses.append(f"opened_at>={_datetime(opened_after, 'opened_after')}")
-    if opened_before is not None:
-        clauses.append(f"opened_at<={_datetime(opened_before, 'opened_before')}")
-
-    if order_by not in ORDER_FIELDS:
-        raise ValidationError(f"order_by must be one of: {', '.join(ORDER_FIELDS)}")
-    if not isinstance(descending, bool):
-        raise ValidationError("descending must be a boolean")
-    clauses.append(f"{'ORDERBYDESC' if descending else 'ORDERBY'}{ORDER_FIELDS[order_by]}")
-
-    return ProblemSearch(
-        query="^".join(clauses),
-        limit=_int_in(limit, "limit", 1, max_limit),
-        offset=_int_in(offset, "offset", 0, 10000),
-    )
+        clauses.append("assignment_groupISEMPTY" if _flag(unassigned, "unassigned") else "assignment_groupISNOTEMPTY")
+    clauses += _text_and_date_clauses(short_description_contains, opened_after, opened_before)
+    return _finish_search(clauses, ORDER_FIELDS, order_by, descending, limit, offset, max_limit)
 
 
 def build_problem_fields(
@@ -431,20 +408,14 @@ def build_problem_fields(
     """Validate and translate problem inputs to ServiceNow field names/raw values."""
     out: dict[str, str] = {}
     if short_description is not None:
-        value = validate_text(short_description, "short_description", 160, required=True)
-        if "\n" in value:
-            raise ValidationError("short_description must be a single line")
-        out["short_description"] = value
+        out["short_description"] = _short_description(short_description)
     elif require_short_description:
         raise ValidationError("short_description is required")
     if description is not None:
         out["description"] = validate_text(description, "description", max_text)
     for name, label in (("category", category), ("subcategory", subcategory)):
         if label is not None:
-            label = label.strip()
-            if not _CATEGORY_RE.match(label):
-                raise ValidationError(f"{name} must be 1-40 letters, digits, spaces, _ or -")
-            out[name] = label
+            out[name] = _category(label, name)
     for name, val in (("urgency", urgency), ("impact", impact)):
         if val is not None:
             out[name] = str(_int_in(val, name, 1, 3))
@@ -506,13 +477,6 @@ CHANGE_TYPES = ("normal", "standard", "emergency")
 CHANGE_ORDER_FIELDS = {**ORDER_FIELDS, "start_date": "start_date"}
 
 
-@dataclass(frozen=True)
-class ChangeSearch:
-    query: str
-    limit: int
-    offset: int
-
-
 def build_change_search(
     *,
     state_map: Mapping[str, str],
@@ -531,53 +495,23 @@ def build_change_search(
     limit: int = 10,
     offset: int = 0,
     max_limit: int = 50,
-) -> ChangeSearch:
+) -> Search:
     clauses: list[str] = []
     if state is not None:
-        key = state.strip().lower() if isinstance(state, str) else ""
-        if key not in CHANGE_STATE_NAMES:
-            raise ValidationError(f"state must be one of: {', '.join(CHANGE_STATE_NAMES)}")
-        clauses.append(f"state={state_map[key]}")
+        clauses.append(f"state={_state_value(state, state_map)}")
     if active is not None:
-        if not isinstance(active, bool):
-            raise ValidationError("active must be a boolean")
-        clauses.append(f"active={'true' if active else 'false'}")
+        clauses.append(_bool_clause("active", active))
     if change_type is not None:
         key = change_type.strip().lower() if isinstance(change_type, str) else ""
         if key not in CHANGE_TYPES:
             raise ValidationError(f"type must be one of: {', '.join(CHANGE_TYPES)}")
         clauses.append(f"type={key}")
-    if priority is not None:
-        clauses.append(f"priority={_int_in(priority, 'priority', 1, 5)}")
+    clauses += _rating_clauses(priority=priority)
     if category is not None:
-        category = category.strip()
-        if not _CATEGORY_RE.match(category):
-            raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
-        clauses.append(f"category={category}")
-    for name, ref in (("assignment_group", assignment_group), ("cmdb_ci", cmdb_ci)):
-        if ref is not None:
-            sys_id = ref.strip().lower()
-            if not SYS_ID_RE.match(sys_id):
-                raise ValidationError(f"{name} must be a 32-character hex sys_id")
-            clauses.append(f"{name}={sys_id}")
-    if short_description_contains is not None:
-        clauses.append(
-            f"short_descriptionLIKE{_text(short_description_contains, 'short_description_contains')}"
-        )
-    if opened_after is not None:
-        clauses.append(f"opened_at>={_datetime(opened_after, 'opened_after')}")
-    if opened_before is not None:
-        clauses.append(f"opened_at<={_datetime(opened_before, 'opened_before')}")
-    if order_by not in CHANGE_ORDER_FIELDS:
-        raise ValidationError(f"order_by must be one of: {', '.join(CHANGE_ORDER_FIELDS)}")
-    if not isinstance(descending, bool):
-        raise ValidationError("descending must be a boolean")
-    clauses.append(f"{'ORDERBYDESC' if descending else 'ORDERBY'}{CHANGE_ORDER_FIELDS[order_by]}")
-    return ChangeSearch(
-        query="^".join(clauses),
-        limit=_int_in(limit, "limit", 1, max_limit),
-        offset=_int_in(offset, "offset", 0, 10000),
-    )
+        clauses.append(f"category={_category(category)}")
+    clauses += _sys_id_clauses(assignment_group=assignment_group, cmdb_ci=cmdb_ci)
+    clauses += _text_and_date_clauses(short_description_contains, opened_after, opened_before)
+    return _finish_search(clauses, CHANGE_ORDER_FIELDS, order_by, descending, limit, offset, max_limit)
 
 
 def build_change_fields(
@@ -605,10 +539,7 @@ def build_change_fields(
     """Validate and translate change inputs to ServiceNow field names/raw values (never the state)."""
     out: dict[str, str] = {}
     if short_description is not None:
-        value = validate_text(short_description, "short_description", 160, required=True)
-        if "\n" in value:
-            raise ValidationError("short_description must be a single line")
-        out["short_description"] = value
+        out["short_description"] = _short_description(short_description)
     elif require_short_description:
         raise ValidationError("short_description is required")
     if change_type is not None:
@@ -627,10 +558,7 @@ def build_change_fields(
         if text is not None:
             out[name] = validate_text(text, name, max_text)
     if category is not None:
-        category = category.strip()
-        if not _CATEGORY_RE.match(category):
-            raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
-        out["category"] = category
+        out["category"] = _category(category)
     if impact is not None:
         out["impact"] = str(_int_in(impact, "impact", 1, 3))
     for name, ref in (("cmdb_ci", cmdb_ci), ("business_service", business_service),

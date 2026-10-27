@@ -35,25 +35,34 @@ def hash_token(token: str) -> str:
 
 
 class _FailureTracker:
+    """Failed-auth timestamps per client. Only clients that have failed are tracked."""
+
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._fails: OrderedDict[str, deque[float]] = OrderedDict()
 
-    def _prune(self, key: str) -> deque[float]:
+    def _expire(self, q: deque[float]) -> None:
         now = self._clock()
-        q = self._fails.setdefault(key, deque())
-        self._fails.move_to_end(key)
         while q and now - q[0] > FAIL_WINDOW:
             q.popleft()
-        while len(self._fails) > MAX_TRACKED_CLIENTS:
-            self._fails.popitem(last=False)
-        return q
 
     def blocked(self, key: str) -> bool:
-        return len(self._prune(key)) >= FAIL_LIMIT
+        q = self._fails.get(key)
+        if q is None:
+            return False
+        self._expire(q)
+        if not q:
+            del self._fails[key]
+            return False
+        return len(q) >= FAIL_LIMIT
 
     def record(self, key: str) -> None:
-        self._prune(key).append(self._clock())
+        q = self._fails.setdefault(key, deque())
+        self._expire(q)
+        q.append(self._clock())
+        self._fails.move_to_end(key)
+        while len(self._fails) > MAX_TRACKED_CLIENTS:
+            self._fails.popitem(last=False)
 
 
 async def _respond(send: Send, status: int, body: dict[str, str], extra: Iterable[tuple[bytes, bytes]] = ()) -> None:

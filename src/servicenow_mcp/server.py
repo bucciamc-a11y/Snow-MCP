@@ -176,8 +176,8 @@ def create_mcp(settings: Settings, client: ServiceNowClient) -> FastMCP:
             raise ValidationError("team assignment is not enabled on this server")
         return lookup_team(team)
 
-    def resolve_problem_team(team: str) -> tuple[str, str]:
-        # problems reuse the same administrator-defined allowlist as incident assignment
+    def resolve_configured_team(team: str) -> tuple[str, str]:
+        # problems and changes reuse the administrator-defined allowlist used for incident assignment
         if not settings.assignment_teams:
             raise ValidationError("no assignment teams are configured on this server (MCP_ASSIGNMENT_GROUPS)")
         return lookup_team(team)
@@ -607,7 +607,7 @@ def create_mcp(settings: Settings, client: ServiceNowClient) -> FastMCP:
                     max_text=settings.max_text_chars,
                 )
                 if team is not None:
-                    fields["assignment_group"] = resolve_problem_team(team)[1]
+                    fields["assignment_group"] = resolve_configured_team(team)[1]
                 if not confirm:
                     return _preview("create_problem", fields_to_set=fields)
                 return {"executed": True, "problem": await client.create_problem(fields)}
@@ -650,7 +650,7 @@ def create_mcp(settings: Settings, client: ServiceNowClient) -> FastMCP:
                     work_note=work_note, comment=comment, max_text=settings.max_text_chars,
                 )
                 if team is not None:
-                    fields["assignment_group"] = resolve_problem_team(team)[1]
+                    fields["assignment_group"] = resolve_configured_team(team)[1]
                 if not fields:
                     raise ValidationError("provide at least one field to change")
                 raw = await client.get_problem_raw(identifier)
@@ -814,7 +814,7 @@ def create_mcp(settings: Settings, client: ServiceNowClient) -> FastMCP:
                     max_text=settings.max_text_chars,
                 )
                 if team is not None:
-                    fields["assignment_group"] = resolve_problem_team(team)[1]
+                    fields["assignment_group"] = resolve_configured_team(team)[1]
                 if not confirm:
                     return _preview("create_change_request", fields_to_set=fields)
                 return {"executed": True, "change_request": await client.create_change(fields)}
@@ -859,7 +859,7 @@ def create_mcp(settings: Settings, client: ServiceNowClient) -> FastMCP:
                     max_text=settings.max_text_chars,
                 )
                 if team is not None:
-                    fields["assignment_group"] = resolve_problem_team(team)[1]
+                    fields["assignment_group"] = resolve_configured_team(team)[1]
                 if not fields:
                     raise ValidationError("provide at least one field to change")
                 raw = await open_change(identifier)

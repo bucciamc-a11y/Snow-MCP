@@ -48,3 +48,22 @@ shell-quoting, style, typing and documentation corrections with no behaviour cha
 * `ruff check .`: clean. `mypy src`: clean (was 10 errors). `shellcheck -S warning` and `bash -n` on all scripts: clean.
 * Not verifiable here: a real install (systemd/Docker) and live ServiceNow calls. The README already recommends
   watching the first run; the port change in `configure.sh` in particular should be exercised once on a real host.
+
+---
+
+# Simplification pass (2026-10-27)
+
+Behaviour-preserving cleanup; the full test suite is the safety net (644 passing, `ruff` and `mypy` clean).
+About 100 fewer lines (+210 / -308).
+
+| Where | Change |
+|---|---|
+| `client.py` | The three near-identical `get_incident_raw` / `get_problem_raw` / `get_change_raw` bodies are now one `_get_raw`. The three `search_*` bodies are one `_search`. Eight create/update bodies are one `_write`. The "is there a next page" calculation, repeated five times, is one `_next_offset`. Public method names are unchanged. |
+| `client.py` | `get_roster` fetches the members of all rosters concurrently (`asyncio.gather`) instead of one roster at a time; member order is unchanged. |
+| `validation.py` | `IncidentSearch`, `ProblemSearch` and `ChangeSearch` were three identical dataclasses; now a single `Search`. The three search builders share small helpers (`_state_value`, `_bool_clause`, `_rating_clauses`, `_category`, `_sys_id_clauses`, `_text_and_date_clauses`, `_finish_search`) instead of repeating the same validation blocks. The `short_description` single-line check and `category` check, copy-pasted into the write builders, are now `_short_description` and `_category`. Clause order and error messages are unchanged. |
+| `auth.py` | The failed-login tracker created an entry and reshuffled its LRU on every request, including healthy ones, so ordinary traffic could push a real offender out of the table. It now tracks only clients that have failed, and forgets them once their window expires. |
+| `server.py` | `resolve_problem_team` renamed `resolve_configured_team`: problems and changes both use it. |
+
+Deliberately not done, to avoid over-engineering: no framework or decorator layer for the MCP tool definitions
+(the repeated `params = {...}` audit dictionaries are explicit and easy to read), and the config helpers `_int` and
+`_float` stay separate.

@@ -4,7 +4,14 @@ import httpx
 import pytest
 from conftest import TOKEN
 
-from servicenow_mcp.auth import FAIL_LIMIT, BearerAuthMiddleware, hash_token
+from servicenow_mcp.auth import (
+    FAIL_LIMIT,
+    FAIL_WINDOW,
+    MAX_TRACKED_CLIENTS,
+    BearerAuthMiddleware,
+    _FailureTracker,
+    hash_token,
+)
 
 
 async def inner(scope, receive, send):
@@ -95,3 +102,16 @@ async def test_failures_logged_without_secrets(caplog):
         await c.post("/mcp", headers={"Authorization": "Bearer super-secret-attempt"})
     text = " ".join(f"{r.getMessage()} {r.__dict__}" for r in caplog.records)
     assert "auth failed" in text and "super-secret-attempt" not in text and TOKEN not in text
+
+
+def test_failure_tracker_only_tracks_clients_that_failed_and_forgets_them_after_the_window():
+    now = [0.0]
+    tracker = _FailureTracker(clock=lambda: now[0])
+    for i in range(MAX_TRACKED_CLIENTS * 2):  # healthy traffic must not fill or evict the table
+        assert not tracker.blocked(f"ok-{i}")
+    assert not tracker._fails
+    for _ in range(FAIL_LIMIT):
+        tracker.record("attacker")
+    assert tracker.blocked("attacker")
+    now[0] += FAIL_WINDOW + 1
+    assert not tracker.blocked("attacker") and "attacker" not in tracker._fails
