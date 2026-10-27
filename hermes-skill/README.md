@@ -2,7 +2,7 @@
 
 Kept separate from the server code. Format: `SKILL.md` with YAML frontmatter (`name`, `description`,
 `version`, `required_environment_variables`, `metadata.hermes.{tags,category}`), per the Hermes skills
-documentation (agentskills.io-style). I could not inspect your installed Hermes; verify with
+documentation (agentskills.io-style). The format follows the public Hermes documentation and may differ between versions; verify with
 `hermes skills list` after installing.
 
 ## Install (on the machine running Hermes)
