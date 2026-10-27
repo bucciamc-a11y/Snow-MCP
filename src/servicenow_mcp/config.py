@@ -277,8 +277,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
     bind_host = env.get("MCP_BIND_HOST", "127.0.0.1").strip()
     cert = env.get("MCP_TLS_CERT_FILE", "").strip() or None
-    key = env.get("MCP_TLS_KEY_FILE", "").strip() or None
-    if bool(cert) != bool(key):
+    tls_key = env.get("MCP_TLS_KEY_FILE", "").strip() or None
+    if bool(cert) != bool(tls_key):
         raise ConfigError("MCP_TLS_CERT_FILE and MCP_TLS_KEY_FILE must be set together")
     proxy = _bool(env, "MCP_BEHIND_TLS_PROXY")
 
@@ -355,7 +355,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         bind_host=bind_host,
         bind_port=_int(env, "MCP_BIND_PORT", 8765, 1, 65535),
         tls_cert_file=cert,
-        tls_key_file=key,
+        tls_key_file=tls_key,
         behind_tls_proxy=proxy,
         request_timeout=_float(env, "MCP_REQUEST_TIMEOUT", 15.0, 1.0, 60.0),
         max_page_size=_int(env, "MCP_MAX_PAGE_SIZE", 50, 1, 100),

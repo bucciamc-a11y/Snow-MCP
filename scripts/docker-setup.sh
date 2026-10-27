@@ -61,7 +61,7 @@ ask "MCP server host name" "$cur_host"; HOST_PUB="$REPLY"
 [[ -n $HOST_PUB ]] || { echo "Host name required" >&2; exit 1; }
 HOST_PUB="${HOST_PUB#*://}"; HOST_PUB="${HOST_PUB%%/*}"; HOST_PUB="${HOST_PUB%%:*}"
 [[ $HOST_PUB =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] || { echo "Invalid host name" >&2; exit 1; }
-HOST_PUB="$(printf '%s' "$HOST_PUB" | tr 'A-Z' 'a-z')"
+HOST_PUB="$(printf '%s' "$HOST_PUB" | tr '[:upper:]' '[:lower:]')"
 ask "Traefik docker network name" "${def_net:-traefik}"; TR_NET="$REPLY"
 ask "Traefik HTTPS entrypoint name" "$(existing TRAEFIK_ENTRYPOINT | grep . || echo websecure)"; TR_EP="$REPLY"
 ask "Traefik certificate resolver name" "${def_res:-letsencrypt}"; TR_RES="$REPLY"

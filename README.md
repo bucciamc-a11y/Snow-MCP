@@ -143,7 +143,7 @@ docs/TOOLS.md            tool reference
 
 ```bash
 python -m venv .venv && . .venv/bin/activate && pip install -e '.[dev]'
-pytest -q        # 346 tests; ServiceNow is mocked, no credentials needed
+pytest -q        # ServiceNow is mocked, no credentials needed
 ruff check src tests
 ```
 Tests cover validation/injection attempts, config and TLS rules, the ServiceNow client (mock transport),

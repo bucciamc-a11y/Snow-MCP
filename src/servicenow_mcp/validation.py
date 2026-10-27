@@ -139,12 +139,12 @@ def build_incident_search(
         if not _CATEGORY_RE.match(category):
             raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
         clauses.append(f"category={category}")
-    for name, val in (("assignment_group", assignment_group), ("caller_id", caller_id)):
-        if val is not None:
-            val = val.strip().lower()
-            if not SYS_ID_RE.match(val):
+    for name, ref in (("assignment_group", assignment_group), ("caller_id", caller_id)):
+        if ref is not None:
+            sys_id = ref.strip().lower()
+            if not SYS_ID_RE.match(sys_id):
                 raise ValidationError(f"{name} must be a 32-character hex sys_id")
-            clauses.append(f"{name}={val}")
+            clauses.append(f"{name}={sys_id}")
     if unassigned is not None:
         if not isinstance(unassigned, bool):
             raise ValidationError("unassigned must be a boolean")
@@ -189,7 +189,8 @@ def validate_text(value: str, name: str, max_len: int, *, required: bool = False
     """Multi-line plain text: no control or bidirectional-override characters."""
     if not isinstance(value, str):
         raise ValidationError(f"{name} must be a string")
-    text = value.replace("\r\n", "\n").strip()
+    # Normalise every line ending (including a lone \r) so single-line checks on "\n" cannot be bypassed.
+    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
     if required and not text:
         raise ValidationError(f"{name} is required")
     if len(text) > max_len:
@@ -239,21 +240,21 @@ def build_incident_fields(
         raise ValidationError("short_description is required")
     if description is not None:
         out["description"] = validate_text(description, "description", max_text)
-    for name, val in (("category", category), ("subcategory", subcategory)):
-        if val is not None:
-            val = val.strip()
-            if not _CATEGORY_RE.match(val):
+    for name, label in (("category", category), ("subcategory", subcategory)):
+        if label is not None:
+            label = label.strip()
+            if not _CATEGORY_RE.match(label):
                 raise ValidationError(f"{name} must be 1-40 letters, digits, spaces, _ or -")
-            out[name] = val
+            out[name] = label
     for name, val in (("urgency", urgency), ("impact", impact)):
         if val is not None:
             out[name] = str(_int_in(val, name, 1, 3))
-    for name, val in (
+    for name, ref in (
         ("caller_id", caller_id), ("assignment_group", assignment_group), ("assigned_to", assigned_to),
         ("business_service", business_service), ("cmdb_ci", cmdb_ci),
     ):
-        if val is not None:
-            out[name] = _sys_id(val, name)
+        if ref is not None:
+            out[name] = _sys_id(ref, name)
     if state is not None:
         key = state.strip().lower() if isinstance(state, str) else ""
         if key not in WRITE_STATES:
@@ -373,12 +374,12 @@ def build_problem_search(
         if not _CATEGORY_RE.match(category):
             raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
         clauses.append(f"category={category}")
-    for name, val in (("assignment_group", assignment_group), ("cmdb_ci", cmdb_ci)):
-        if val is not None:
-            val = val.strip().lower()
-            if not SYS_ID_RE.match(val):
+    for name, ref in (("assignment_group", assignment_group), ("cmdb_ci", cmdb_ci)):
+        if ref is not None:
+            sys_id = ref.strip().lower()
+            if not SYS_ID_RE.match(sys_id):
                 raise ValidationError(f"{name} must be a 32-character hex sys_id")
-            clauses.append(f"{name}={val}")
+            clauses.append(f"{name}={sys_id}")
     if unassigned is not None:
         if not isinstance(unassigned, bool):
             raise ValidationError("unassigned must be a boolean")
@@ -438,20 +439,20 @@ def build_problem_fields(
         raise ValidationError("short_description is required")
     if description is not None:
         out["description"] = validate_text(description, "description", max_text)
-    for name, val in (("category", category), ("subcategory", subcategory)):
-        if val is not None:
-            val = val.strip()
-            if not _CATEGORY_RE.match(val):
+    for name, label in (("category", category), ("subcategory", subcategory)):
+        if label is not None:
+            label = label.strip()
+            if not _CATEGORY_RE.match(label):
                 raise ValidationError(f"{name} must be 1-40 letters, digits, spaces, _ or -")
-            out[name] = val
+            out[name] = label
     for name, val in (("urgency", urgency), ("impact", impact)):
         if val is not None:
             out[name] = str(_int_in(val, name, 1, 3))
-    for name, val in (
+    for name, ref in (
         ("cmdb_ci", cmdb_ci), ("business_service", business_service), ("assignment_group", assignment_group),
     ):
-        if val is not None:
-            out[name] = _sys_id(val, name)
+        if ref is not None:
+            out[name] = _sys_id(ref, name)
     if state is not None:
         key = state.strip().lower() if isinstance(state, str) else ""
         if key not in PROBLEM_UPDATE_STATES:
@@ -459,9 +460,9 @@ def build_problem_fields(
                 f"state may only be set to: {', '.join(PROBLEM_UPDATE_STATES)} (use resolve_problem to resolve)"
             )
         out["state"] = state_map[key]
-    for name, val in (("cause_notes", cause_notes), ("workaround", workaround), ("fix_notes", fix_notes)):
-        if val is not None:
-            out[name] = validate_text(val, name, max_text, required=True)
+    for name, text in (("cause_notes", cause_notes), ("workaround", workaround), ("fix_notes", fix_notes)):
+        if text is not None:
+            out[name] = validate_text(text, name, max_text, required=True)
     if known_error is not None:
         if not isinstance(known_error, bool):
             raise ValidationError("known_error must be a boolean")
@@ -553,12 +554,12 @@ def build_change_search(
         if not _CATEGORY_RE.match(category):
             raise ValidationError("category must be 1-40 letters, digits, spaces, _ or -")
         clauses.append(f"category={category}")
-    for name, val in (("assignment_group", assignment_group), ("cmdb_ci", cmdb_ci)):
-        if val is not None:
-            val = val.strip().lower()
-            if not SYS_ID_RE.match(val):
+    for name, ref in (("assignment_group", assignment_group), ("cmdb_ci", cmdb_ci)):
+        if ref is not None:
+            sys_id = ref.strip().lower()
+            if not SYS_ID_RE.match(sys_id):
                 raise ValidationError(f"{name} must be a 32-character hex sys_id")
-            clauses.append(f"{name}={val}")
+            clauses.append(f"{name}={sys_id}")
     if short_description_contains is not None:
         clauses.append(
             f"short_descriptionLIKE{_text(short_description_contains, 'short_description_contains')}"
@@ -619,12 +620,12 @@ def build_change_fields(
                 "this server only lets agents create changes of type: " + (", ".join(allowed_types) or "(none)")
             )
         out["type"] = key
-    for name, val in (
+    for name, text in (
         ("description", description), ("justification", justification),
         ("implementation_plan", implementation_plan), ("backout_plan", backout_plan), ("test_plan", test_plan),
     ):
-        if val is not None:
-            out[name] = validate_text(val, name, max_text)
+        if text is not None:
+            out[name] = validate_text(text, name, max_text)
     if category is not None:
         category = category.strip()
         if not _CATEGORY_RE.match(category):
@@ -632,10 +633,10 @@ def build_change_fields(
         out["category"] = category
     if impact is not None:
         out["impact"] = str(_int_in(impact, "impact", 1, 3))
-    for name, val in (("cmdb_ci", cmdb_ci), ("business_service", business_service),
+    for name, ref in (("cmdb_ci", cmdb_ci), ("business_service", business_service),
                       ("assignment_group", assignment_group)):
-        if val is not None:
-            out[name] = _sys_id(val, name)
+        if ref is not None:
+            out[name] = _sys_id(ref, name)
     if start_date is not None:
         out["start_date"] = _datetime(start_date, "start_date")
     if end_date is not None:

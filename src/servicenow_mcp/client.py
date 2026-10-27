@@ -283,7 +283,9 @@ class ServiceNowClient:
                         raise ServiceNowError("ServiceNow response exceeded the size limit",
                                               code="too_large")
                 total = resp.headers.get("X-Total-Count")
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+        # NetworkError covers ConnectError plus ReadError/WriteError/CloseError (e.g. a connection reset after
+        # the request was sent). For a write that means the outcome is unknown, never "did not happen".
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
             if isinstance(exc, httpx.ConnectError) and "CERTIFICATE" in str(exc).upper():
                 raise ServiceNowError("TLS certificate verification for ServiceNow failed",
                                       code="tls_error") from None

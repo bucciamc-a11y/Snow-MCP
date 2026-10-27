@@ -9,7 +9,7 @@ APP_DIR=/opt/servicenow-mcp
 CONF_DIR=/etc/servicenow-mcp
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-[[ $EUID -eq 0 ]] || { echo "Run as root (e.g. "su -" then bash scripts/install.sh)" >&2; exit 1; }
+[[ $EUID -eq 0 ]] || { echo 'Run as root (e.g. "su -" then bash scripts/install.sh)' >&2; exit 1; }
 [[ -f "$SRC_DIR/pyproject.toml" ]] || { echo "Run from the project directory" >&2; exit 1; }
 command -v systemctl >/dev/null || { echo "systemd is required" >&2; exit 1; }
 

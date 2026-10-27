@@ -14,7 +14,7 @@ case "$mode" in
      bash /opt/servicenow-mcp/scripts/configure.sh
      bash /opt/servicenow-mcp/scripts/check.sh || echo "!! check failed; see README"
      read -r -p "Enable and start the service now? [Y/n]: " yn
-     if [[ ! $yn =~ ^[Nn]$ ]]; then systemctl enable --now servicenow-mcp; systemctl --no-pager status servicenow-mcp | head -n 8; fi
+     if [[ ! $yn =~ ^[Nn]$ ]]; then systemctl enable --now servicenow-mcp; systemctl --no-pager status servicenow-mcp | head -n 8 || true; fi
      bash "$HERE/scripts/hermes-instructions.sh" ;;
   *) echo "Invalid choice" >&2; exit 1 ;;
 esac

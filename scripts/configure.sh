@@ -56,7 +56,7 @@ ask "MCP server host name" "$cur_host"; HOSTNAME_PUB="$REPLY"
 HOSTNAME_PUB="${HOSTNAME_PUB#*://}"; HOSTNAME_PUB="${HOSTNAME_PUB%%/*}"; HOSTNAME_PUB="${HOSTNAME_PUB%%:*}"
 [[ $HOSTNAME_PUB =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] \
   || { echo "Invalid host name" >&2; exit 1; }
-HOSTNAME_PUB="$(printf '%s' "$HOSTNAME_PUB" | tr 'A-Z' 'a-z')"
+HOSTNAME_PUB="$(printf '%s' "$HOSTNAME_PUB" | tr '[:upper:]' '[:lower:]')"
 
 cur_hash="$(existing_value "$SECRETS" MCP_AUTH_TOKEN_SHA256)"
 NEW_TOKEN=""
@@ -89,7 +89,11 @@ if [[ $yn =~ ^[Nn]$ ]]; then
   TLS_LINES=$'MCP_TLS_CERT_FILE='"$CERT"$'\nMCP_TLS_KEY_FILE='"$KEY"
   BEHIND=false
   read -r -p "Bind address [0.0.0.0]: " BIND; BIND="${BIND:-0.0.0.0}"
-  PORT=443
+  # The service runs unprivileged with no capabilities (see deploy/servicenow-mcp.service), so it cannot bind
+  # ports below 1024; 443 would fail at start-up. Use a high port (or forward 443 to it with your firewall).
+  read -r -p "TCP port to listen on (1024-65535) [8443]: " PORT; PORT="${PORT:-8443}"
+  [[ $PORT =~ ^[0-9]+$ ]] && ((PORT >= 1024 && PORT <= 65535)) \
+    || { echo "Port must be a number between 1024 and 65535 (the service cannot bind privileged ports)." >&2; exit 1; }
 else
   PORT=8765
   echo
@@ -264,4 +268,6 @@ echo "Saved."
 if [[ $BEHIND == true ]]; then
   echo "Add the Traefik route (see /etc/servicenow-mcp/examples/traefik-dynamic.yml.example), pointing at http://$BIND:$PORT."
   echo "Hermes URL: https://$HOSTNAME_PUB/mcp"
+else
+  echo "Native TLS on port $PORT. Hermes URL: https://$HOSTNAME_PUB:$PORT/mcp"
 fi

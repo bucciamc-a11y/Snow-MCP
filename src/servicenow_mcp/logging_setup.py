@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 from datetime import UTC, datetime
+from typing import Any
 
 _EXTRA_FIELDS = (
     "event", "tool", "params", "identifier", "outcome", "error_code",
@@ -15,7 +16,7 @@ _EXTRA_FIELDS = (
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        entry = {
+        entry: dict[str, Any] = {
             "ts": datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "logger": record.name,
