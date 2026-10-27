@@ -26,7 +26,7 @@ kept safe, see [README.md](README.md). Tool reference: [docs/TOOLS.md](docs/TOOL
    (Enter generates one and shows it **once**). Nothing secret is passed in arguments or stored in history.
 3. When setup finishes it prints **step-by-step Hermes connection instructions** (token into
    `~/.hermes/.env`, `mcp_servers` block for `config.yaml`, skill install, `hermes mcp test`). Reprint them any
-   time with `bash scripts/hermes-instructions.sh`. Details: `hermes-skill/README.md`.
+   time with `bash scripts/hermes-instructions.sh`. Details: `skills/hermes/README.md`.
 
 Setup asks which write features to enable (default: none) and, for assignment, which teams are allowed.
 Hermes endpoint: **`https://mcp.example.com/mcp`** (do not strip the `/mcp` prefix in Traefik).

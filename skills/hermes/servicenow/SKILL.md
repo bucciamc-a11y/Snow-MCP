@@ -16,7 +16,7 @@ metadata:
 
 # ServiceNow
 
-Use the `servicenow` MCP server (tools appear as `mcp_servicenow_<tool>`). **Which write tools exist
+Use the `servicenow` MCP server. Its tools appear as `mcp_servicenow_<tool>`. **Which write tools exist
 depends on what the administrator enabled** - only call tools that are actually listed. Anything not
 listed (delete, closing/cancelling incidents, closing problems, rejecting changes, arbitrary API calls) is **not possible**
 through this integration; say so and offer to draft the text for the user to apply in ServiceNow.
@@ -117,14 +117,14 @@ and enter the Authorization header interactively. The server speaks Streamable H
 
 | What you see | What to do |
 |---|---|
-| 401 / "unauthorized" from the MCP server | Token wrong or rotated: tell the user to check `SERVICENOW_MCP_TOKEN`. Never ask them to paste it into chat |
+| 401 / "unauthorized" from the MCP server | Token wrong or rotated: tell the user to check the token configured for the connection. Never ask them to paste it into chat |
 | "too many failed attempts" / rate limit | Wait about a minute, retry once |
-| 400 "TLS required", 421 host errors | Traefik route/host mismatch; user checks the route and `MCP_PUBLIC_HOSTNAME` |
+| 400 "TLS required", 421 host errors | Reverse-proxy route/host mismatch; the administrator checks the route and `MCP_PUBLIC_HOSTNAME` |
 | "credentials rejected (HTTP 401)" | The ServiceNow integration account is wrong/locked; a ServiceNow admin must fix it |
 | "not permitted (HTTP 403)" | Missing role/ACL for that table/operation |
 | "ServiceNow rejected the data (HTTP 400): ..." | A field value failed instance validation (mandatory field, bad choice); fix the input with the user |
 | "not allowed" / "no pending approval" / team not in list | A guard worked as designed; don't try to work around it |
 | "outcome is UNKNOWN" | Re-read the record before any retry |
-| Connection refused / TLS errors | Server down or certificate issue; suggest `hermes mcp test servicenow` and the server's logs |
+| Connection refused / TLS errors | Server down or certificate issue; suggest testing the connection from the client and checking the server's logs |
 
 Never print, log or request the token, ServiceNow credentials or Authorization headers.

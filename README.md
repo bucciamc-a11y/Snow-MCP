@@ -80,7 +80,7 @@ Hermes ──HTTPS + Authorization: Bearer <MCP token>──▶ Traefik (TLS, yo
 * **Hermes:** documented config (as of late 2026) is `mcp_servers:` in `~/.hermes/config.yaml` with
   `url`, `headers`, `timeout`, `tools.include`; `${VAR}` placeholders resolved from `~/.hermes/.env`;
   tools named `mcp_<server>_<tool>`. The Hermes format was written from its public documentation and not checked against every version; if yours differs use
-  `hermes mcp add` / `hermes mcp test` (see `hermes-skill/`, "Adjusting for your version").
+  `hermes mcp add` / `hermes mcp test` (see `skills/hermes/`, "Adjusting for your version").
 * **ServiceNow:** Table API (`/api/now/table/...`), `sysparm_*` parameters, `X-Total-Count` header. Any
   supported release. Basic Auth must be allowed for REST for the integration user (default).
 * **Traefik:** v2/v3, HTTPS entrypoint with a certificate resolver. In Docker mode the container joins
@@ -100,7 +100,7 @@ Hermes ──HTTPS + Authorization: Bearer <MCP token>──▶ Traefik (TLS, yo
 |---|---|
 | [INSTALL.md](INSTALL.md) | Quick start, the ServiceNow account and permissions you must create, Docker and systemd install, verification, operations, troubleshooting, uninstall |
 | [docs/TOOLS.md](docs/TOOLS.md) | Per-tool inputs and validation rules, fields returned |
-| [hermes-skill/](hermes-skill/README.md) | The Hermes skill: install and connection setup |
+| [skills/](skills/README.md) | Skills for Claude Desktop, OpenClaw, Paperclip, ChatGPT Desktop, Hermes and a generic one for any client |
 | [fixes.md](fixes.md) | Issues found while building and testing, how each was fixed, known gaps |
 
 ## Quick start
@@ -123,7 +123,7 @@ scripts/                 install, configure, docker-setup, check, hermes-instruc
 src/servicenow_mcp/      server, config, validation, ServiceNow client, auth, CLI
 tests/                   pytest suite (ServiceNow is mocked)
 config/  docker/  deploy/  example config, Docker Compose, systemd unit
-hermes-skill/            the Hermes skill (SKILL.md) and its install notes
+skills/                  agent skills per client (generated from skills/_source) + build.py
 docs/TOOLS.md            tool reference
 ```
 

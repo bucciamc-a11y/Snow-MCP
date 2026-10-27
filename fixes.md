@@ -59,3 +59,10 @@ or by code review. Final state: **346 tests pass (183 at first release), `ruff c
 Known gaps for this update: the new setup-script prompts were syntax-checked (`bash -n`) and the state-value regex was exercised, but the scripts were not run end to end. Problem field names and the state model follow standard ServiceNow tables and were not verified against your instance - confirm with a preview, then one change on a test problem.
 
 Verified for this update: 346 passed, 1 skipped in 3.61s; `ruff check src tests` clean; live loopback smoke test: `tools/list` returns 3 tools by default, 5 with `MCP_ENABLE_PROBLEM_READ`, 9 with `MCP_ENABLE_PROBLEM_WRITES`, 18 with every feature enabled; unauthenticated call rejected (401); a query-injection identifier (`PRB1^ORDERBYDESC`) rejected by `get_problem`.
+
+## Update: skills for other clients
+
+| # | Found by | Issue | Fix |
+|---|---|---|---|
+| 31 | requirement | The skill was Hermes-specific (frontmatter, tool prefix, connection steps) | `hermes-skill/` moved to `skills/hermes/`; added `skills/generic` (any `SKILL.md` client) plus Claude Desktop, OpenClaw, Paperclip and ChatGPT Desktop variants. All are generated from one shared body (`skills/_source/body.md`) by `skills/build.py`, and a test fails if a generated file is stale, misses a tool, or contains a secret-looking value |
+| 32 | research | Client facts could not all be confirmed | Claude Desktop header auth is a beta available to some orgs; OpenClaw header syntax and ChatGPT bearer-token support are **not verified** (ChatGPT documents OAuth only, and this server has no OAuth). Each client README says what was and wasn't confirmed |

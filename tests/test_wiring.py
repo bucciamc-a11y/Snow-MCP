@@ -21,7 +21,7 @@ FLAG_FILES = [
     "scripts/docker-setup.sh",
     "scripts/hermes-instructions.sh",
 ]
-TOOL_FILES = ["scripts/hermes-instructions.sh", "hermes-skill/servicenow/SKILL.md", "README.md"]
+TOOL_FILES = ["scripts/hermes-instructions.sh", "skills/hermes/servicenow/SKILL.md", "README.md"]
 
 
 def text(rel: str) -> str:
@@ -51,3 +51,29 @@ def test_tool_is_documented(rel, tool):
 def test_problem_state_setting_wired():
     for rel in FLAG_FILES[:5]:
         assert "MCP_PROBLEM_STATES" in text(rel), rel
+
+
+SKILL_FILES = ["generic/servicenow/SKILL.md", "claude-desktop/servicenow/SKILL.md", "openclaw/servicenow/SKILL.md",
+               "paperclip/servicenow/SKILL.md", "hermes/servicenow/SKILL.md", "chatgpt-desktop/instructions.md"]
+
+
+def test_generated_skills_are_up_to_date():
+    import subprocess
+    import sys
+
+    r = subprocess.run([sys.executable, str(ROOT / "skills" / "build.py"), "--check"],
+                       capture_output=True, text=True, check=False)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("rel", SKILL_FILES)
+@pytest.mark.parametrize("tool", TOOLS)
+def test_every_skill_mentions_every_tool(rel, tool):
+    assert tool in (ROOT / "skills" / rel).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("rel", SKILL_FILES)
+def test_skills_hold_no_secrets_or_private_hosts(rel):
+    text = (ROOT / "skills" / rel).read_text(encoding="utf-8")
+    assert not re.search(r"srv\d{5,}", text)
+    assert not re.search(r"Bearer [A-Za-z0-9_\-]{24,}", text)

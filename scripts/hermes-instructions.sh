@@ -28,7 +28,7 @@ fi
 WRITE_NOTE=""
 [[ -n $WRITES ]] && WRITE_NOTE=" Write tools preview first; they change nothing until called again with confirm=true.
     Keep Hermes' own tool-approval prompts ON for the write tools so a human approves each change."
-SKILL_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/hermes-skill/servicenow"
+SKILL_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/skills/hermes/servicenow"
 
 cat <<EOF
 
@@ -58,7 +58,7 @@ Do these on the machine where Hermes runs:
             tools:
               include: [$INCLUDE]
 
- 3. Install the skill (copy hermes-skill/servicenow from this project to that machine):
+ 3. Install the skill (copy skills/hermes/servicenow from this project to that machine):
         mkdir -p ~/.hermes/skills/devops
         cp -r servicenow ~/.hermes/skills/devops/
     ${SKILL_SRC:+(skill source on this server: $SKILL_SRC)}
@@ -76,6 +76,6 @@ Do these on the machine where Hermes runs:
    400 / 421 -> Traefik route or host name mismatch (host must be $HOST, path /mcp not stripped)
    hermes can't expand \${VAR} -> use: hermes mcp add servicenow --url https://$HOST/mcp
                                    and enter the Authorization header when prompted
-   Full details: README.md and hermes-skill/servicenow/SKILL.md
+   Full details: README.md and skills/hermes/servicenow/SKILL.md
 ================================================================================
 EOF
