@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import BearerAuthMiddleware
 from .client import ServiceNowClient, ServiceNowError
@@ -26,7 +26,12 @@ from .validation import (
     BLOCKED_RESOLVE_STATES,
     BLOCKED_UPDATE_STATES,
     CHANGE_PHASES,
+    VARIABLE_TYPES,
     ValidationError,
+    VariableBuild,
+    build_catalog_item_fields,
+    build_catalog_search,
+    build_catalog_variables,
     build_change_cancel,
     build_change_close,
     build_change_fields,
@@ -39,6 +44,7 @@ from .validation import (
     build_problem_fields,
     build_problem_resolution,
     build_problem_search,
+    catalog_record_count,
     validate_approval_comment,
     validate_sys_id,
 )
@@ -62,6 +68,36 @@ Confirm = Annotated[
 ]
 Urgency = Annotated[int | None, Field(ge=1, le=3, description="1=high 2=medium 3=low")]
 LongText = Annotated[str | None, Field(max_length=4000)]
+
+_MAYBE_EXECUTED = {"unknown_outcome", "partial_build"}  # error codes where a write may already have happened
+CATALOG_DRAFT_NOTE = (
+    "Created INACTIVE. A person must review it and activate it in ServiceNow; who can see it (user criteria) "
+    "and how submissions are fulfilled are also configured there."
+)
+
+
+class Choice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(max_length=80, description="Text the client sees")
+    value: str | None = Field(None, max_length=40, description="Stored value; defaults to a slug of the label")
+
+
+class CatalogVariable(BaseModel):
+    """One question on the form."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(max_length=40, description="Internal name: lowercase letters, digits, _ (e.g. laptop_model)")
+    label: str = Field(max_length=160, description="The question the client sees")
+    type: Literal["yes_no", "multi_line_text", "select_box", "single_line_text", "checkbox", "reference", "date",
+                  "date_time"]
+    mandatory: bool = False
+    default_value: str | None = Field(None, max_length=200)
+    help_text: str | None = Field(None, max_length=400)
+    choices: list[Choice] | None = Field(None, max_length=25, description="Required for select_box, not allowed otherwise")
+    reference_table: str | None = Field(None, max_length=80, description="Required for reference, e.g. sys_user")
+    maps_to_field: str | None = Field(None, max_length=80, description="Record producers only: column of the "
+                                      "target table this answer is copied into, e.g. short_description")
+
 
 NOTHING_CHANGED = (
     "NOTHING WAS CHANGED. Show this preview to the user; if they approve, call the same tool again "
@@ -109,7 +145,7 @@ async def _audited(
         done("rejected", "validation")
         raise ValueError(f"invalid input: {exc}") from None
     except ServiceNowError as exc:
-        done("error", exc.code, executed=False if exc.code != "unknown_outcome" and write else None)
+        done("error", exc.code, executed=False if exc.code not in _MAYBE_EXECUTED and write else None)
         raise ValueError(str(exc)) from None
     except Exception as exc:  # noqa: BLE001 - deliberate catch-all; never leak internals
         done("error", "internal")
@@ -131,8 +167,11 @@ def _instructions(s: Settings) -> str:
         parts.append("Problem tools: search_problems, get_problem (get_problem also lists linked incidents).")
     if s.enable_change_read:
         parts.append("Change tools: search_change_requests.")
+    if s.enable_catalog_read:
+        parts.append("Catalog tools: search_catalog_items, get_catalog_item, get_catalog_options.")
     if (s.enable_incident_writes or s.enable_incident_assignment or s.enable_change_approval
-            or s.enable_oncall_writes or s.enable_problem_writes or s.enable_change_writes):
+            or s.enable_oncall_writes or s.enable_problem_writes or s.enable_change_writes
+            or s.enable_catalog_writes):
         parts.append(
             "Write tools are enabled. Every write tool previews first (confirm=false) and changes "
             "nothing until you call it again with confirm=true after the user approves. Never "
@@ -955,6 +994,190 @@ def create_mcp(settings: Settings, client: ServiceNowClient) -> FastMCP:
 
             return await _audited("cancel_change_request", params, run, str(identifier), write=True)
 
+    # ======================= service catalog =======================
+    if settings.enable_catalog_read:
+
+        @mcp.tool(annotations=READ_ONLY)
+        async def search_catalog_items(
+            name_contains: Annotated[str | None, Field(max_length=100, description="Substring of the item name")] = None,
+            kind: Annotated[Literal["item", "record_producer"] | None, Field(description="Only catalog items or only record producers")] = None,
+            active: Annotated[bool | None, Field(description="true: live items; false: drafts")] = None,
+            category: Annotated[str | None, Field(description="Category sys_id (see get_catalog_options)")] = None,
+            catalog: Annotated[str | None, Field(description="Catalog sys_id (see get_catalog_options)")] = None,
+            order_by: Annotated[Literal["name", "updated_at"], Field()] = "name",
+            descending: bool = False,
+            limit: Annotated[int, Field(ge=1, le=100, description="Page size (the server may cap this lower)")] = 10,
+            offset: Annotated[int, Field(ge=0, le=10000, description="Use next_offset from the previous page")] = 0,
+        ) -> dict[str, Any]:
+            """Find service catalog items and record producers. Use before creating one to avoid duplicates."""
+            params = {"name_contains": name_contains, "kind": kind, "active": active, "category": category,
+                      "catalog": catalog, "order_by": order_by, "descending": descending, "limit": limit,
+                      "offset": offset}
+
+            async def run() -> dict[str, Any]:
+                search = build_catalog_search(
+                    name_contains=name_contains, kind=kind, active=active, category=category, catalog=catalog,
+                    order_by=order_by, descending=descending, limit=limit, offset=offset,
+                    max_limit=settings.max_page_size,
+                )
+                return await client.search_catalog_items(search)
+
+            return await _audited("search_catalog_items", params, run)
+
+        @mcp.tool(annotations=READ_ONLY)
+        async def get_catalog_item(item_id: SysId) -> dict[str, Any]:
+            """One catalog item or record producer by sys_id, with its form variables (select boxes list their choices)."""
+            async def run() -> dict[str, Any]:
+                return await client.get_catalog_item(item_id)
+
+            return await _audited("get_catalog_item", {"item_id": item_id}, run, item_id)
+
+        @mcp.tool(annotations=READ_ONLY)
+        async def get_catalog_options(
+            catalog: Annotated[str | None, Field(description="Only the categories of this catalog (sys_id)")] = None,
+            limit: Annotated[int, Field(ge=1, le=100, description="Max categories")] = 50,
+        ) -> dict[str, Any]:
+            """The catalogs and categories a new item can be placed in, the variable types available, and (for
+            record producers) the tables an administrator allows them to create records in."""
+            async def run() -> dict[str, Any]:
+                out = await client.catalog_options(catalog, limit)
+                return {**out, "count": len(out["categories"]), "variable_types": list(VARIABLE_TYPES),
+                        "producer_target_tables": list(settings.producer_target_tables)
+                        if settings.enable_catalog_writes else []}
+
+            return await _audited("get_catalog_options", {"catalog": catalog, "limit": limit}, run)
+
+    if settings.enable_catalog_writes:
+        record_cap = settings.write_rate_limit_per_minute
+
+        def check_size(builds: list[VariableBuild]) -> int:
+            total = catalog_record_count(builds) + 1
+            if total > record_cap:
+                raise ValidationError(
+                    f"this would create {total} records (the item, each variable and each choice) but at most "
+                    f"{record_cap} fit in one call; build the item with fewer variables, then add the rest with "
+                    "add_catalog_variables after a minute")
+            return total
+
+        def summarise(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            return [{"name": v["name"], "label": v["label"], "type": v["type"], "mandatory": v.get("mandatory", False),
+                     **({"choices": [c["label"] for c in v["choices"]]} if v.get("choices") else {}),
+                     **({"maps_to_field": v["maps_to_field"]} if v.get("maps_to_field") else {})} for v in raw]
+
+        async def create_variables(item_id: str, builds: list[VariableBuild]) -> None:
+            done = 0
+            try:
+                for b in builds:
+                    var = await client.create_variable(item_id, b.fields)
+                    for choice in b.choices:
+                        await client.create_choice(var["sys_id"], choice)
+                    done += 1
+            except ServiceNowError as exc:
+                raise ServiceNowError(
+                    f"draft {item_id} exists but creation stopped after {done} of {len(builds)} variables: {exc}. "
+                    "Read it with get_catalog_item and add the missing variables with add_catalog_variables.",
+                    code="partial_build", status=exc.status) from None
+
+        async def build_item(tool: str, table: str, fields: dict[str, str], raw_vars: list[dict[str, Any]],
+                             builds: list[VariableBuild], confirm: bool) -> dict[str, Any]:
+            total = check_size(builds)
+            if not confirm:
+                return _preview(tool, table=table, fields_to_set=fields, variables=summarise(raw_vars),
+                                records_to_create=total, will_be=CATALOG_DRAFT_NOTE)
+            created = await client.create_catalog_item(table, fields)
+            await create_variables(created["sys_id"], builds)
+            return {"executed": True, "item": created, "variables_created": len(builds), "message": CATALOG_DRAFT_NOTE}
+
+        @mcp.tool(annotations=WRITE_NEW)
+        async def create_catalog_item(
+            name: Annotated[str, Field(min_length=1, max_length=100, description="Item name shown in the catalog")],
+            short_description: Annotated[str, Field(min_length=1, max_length=160, description="One-line summary shown to clients")],
+            category: Annotated[str, Field(description="Category sys_id (from get_catalog_options)")],
+            catalog: Annotated[str, Field(description="Catalog sys_id (from get_catalog_options)")],
+            variables: Annotated[list[CatalogVariable] | None, Field(max_length=30, description="The form questions, in order")] = None,
+            description: LongText = None,
+            confirm: Confirm = False,
+        ) -> dict[str, Any]:
+            """Create a catalog item with its form variables. It is always created INACTIVE for a person to review and
+            activate. Preview first (confirm=false), then confirm=true to create."""
+            params = {"name": name, "short_description": short_description, "category": category,
+                      "catalog": catalog, "variables": variables, "description": description, "confirm": confirm}
+
+            async def run() -> dict[str, Any]:
+                fields = build_catalog_item_fields(
+                    name=name, short_description=short_description, category=category, catalog=catalog,
+                    description=description, max_text=settings.max_text_chars,
+                )
+                raw_vars = [v.model_dump(exclude_none=True) for v in variables or []]
+                builds = build_catalog_variables(raw_vars, max_text=settings.max_text_chars) if raw_vars else []
+                return await build_item("create_catalog_item", "sc_cat_item", fields, raw_vars, builds, confirm)
+
+            return await _audited("create_catalog_item", params, run, write=True)
+
+        @mcp.tool(annotations=WRITE_NEW)
+        async def create_record_producer(
+            name: Annotated[str, Field(min_length=1, max_length=100, description="Record producer name shown in the catalog")],
+            short_description: Annotated[str, Field(min_length=1, max_length=160, description="One-line summary shown to clients")],
+            category: Annotated[str, Field(description="Category sys_id (from get_catalog_options)")],
+            catalog: Annotated[str, Field(description="Catalog sys_id (from get_catalog_options)")],
+            target_table: Annotated[str, Field(description="Table the submission creates a record in; must be one of producer_target_tables from get_catalog_options")],
+            variables: Annotated[list[CatalogVariable], Field(min_length=1, max_length=30, description="The form questions; set maps_to_field to copy an answer into a column of target_table")],
+            description: LongText = None,
+            confirm: Confirm = False,
+        ) -> dict[str, Any]:
+            """Create a record producer: a catalog form whose answers become a record in target_table (no scripts;
+            answers are mapped to columns with maps_to_field). Always created INACTIVE. Preview first."""
+            params = {"name": name, "short_description": short_description, "category": category,
+                      "catalog": catalog, "target_table": target_table, "variables": variables,
+                      "description": description, "confirm": confirm}
+
+            async def run() -> dict[str, Any]:
+                fields = build_catalog_item_fields(
+                    name=name, short_description=short_description, category=category, catalog=catalog,
+                    description=description, target_table=target_table,
+                    allowed_target_tables=settings.producer_target_tables, max_text=settings.max_text_chars,
+                )
+                raw_vars = [v.model_dump(exclude_none=True) for v in variables]
+                builds = build_catalog_variables(raw_vars, producer=True, max_text=settings.max_text_chars)
+                return await build_item("create_record_producer", "sc_cat_item_producer", fields, raw_vars, builds,
+                                        confirm)
+
+            return await _audited("create_record_producer", params, run, write=True)
+
+        @mcp.tool(annotations=WRITE_NEW)
+        async def add_catalog_variables(
+            item_id: SysId,
+            variables: Annotated[list[CatalogVariable], Field(min_length=1, max_length=30, description="Questions to append after the existing ones")],
+            confirm: Confirm = False,
+        ) -> dict[str, Any]:
+            """Append form variables to a catalog item or record producer that is still INACTIVE (live items cannot
+            be changed here). Preview first (confirm=false)."""
+            params = {"item_id": item_id, "variables": variables, "confirm": confirm}
+
+            async def run() -> dict[str, Any]:
+                raw = await client.get_catalog_item_raw(item_id)
+                if raw.get("active") != "false":
+                    raise ServiceNowError("only inactive draft items can be extended here; this one is live",
+                                          code="not_allowed")
+                kind = raw.get("sys_class_name")
+                if kind not in ("sc_cat_item", "sc_cat_item_producer"):
+                    raise ServiceNowError("this record is not a plain catalog item or record producer",
+                                          code="not_allowed")
+                raw_vars = [v.model_dump(exclude_none=True) for v in variables]
+                builds = build_catalog_variables(
+                    raw_vars, producer=kind == "sc_cat_item_producer",
+                    start_order=await client.last_variable_order(raw["sys_id"]), max_text=settings.max_text_chars,
+                )
+                total = check_size(builds) - 1  # no item record is created here
+                if not confirm:
+                    return _preview("add_catalog_variables", item=await client.get_catalog_item(raw["sys_id"]),
+                                    variables=summarise(raw_vars), records_to_create=total)
+                await create_variables(raw["sys_id"], builds)
+                return {"executed": True, "variables_created": len(builds),
+                        "item": await client.get_catalog_item(raw["sys_id"])}
+
+            return await _audited("add_catalog_variables", params, run, item_id, write=True)
+
     return mcp
 
 
@@ -995,7 +1218,7 @@ def main() -> None:
             "path": f"{settings.bind_host}:{settings.bind_port}",
             "params": [n for n in ("incident_writes", "incident_assignment", "change_approval", "oncall_read",
                                    "oncall_writes", "problem_read", "problem_writes", "change_read",
-                                   "change_writes")
+                                   "change_writes", "catalog_read", "catalog_writes")
                        if getattr(settings, f"enable_{n}")],
         },
     )

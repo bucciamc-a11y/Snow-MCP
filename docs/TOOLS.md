@@ -26,6 +26,9 @@ choice fields are returned as display values. Records the account cannot read be
 | `search_problems` | `state` (new/assess/root_cause_analysis/fix_in_progress/resolved/closed), `active`, `known_error`, `unassigned`, `priority` 1-5, `urgency` 1-3, `impact` 1-3, `category`, `assignment_group`/`cmdb_ci` (32-hex sys_id), `short_description_contains` (same rules as incidents), `opened_after`/`opened_before`, `order_by`, `descending`, `limit`, `offset` | read `problem` |
 | `search_change_requests` | `state` (new/assess/authorize/scheduled/implement/review/closed/canceled), `active`, `type` (normal/standard/emergency), `priority` 1-5, `category`, `assignment_group`/`cmdb_ci` (32-hex sys_id), `short_description_contains` (same rules as incidents), `opened_after`/`opened_before`, `order_by` (also `start_date`), `descending`, `limit`, `offset` | read `change_request` |
 | `get_problem` | `identifier`: `PRB` + 7-10 digits, or 32-hex sys_id | read `problem`, `incident` |
+| `search_catalog_items` | `name_contains` (same rules as `short_description_contains`), `kind` (item/record_producer), `active`, `category`/`catalog` (32-hex sys_id), `order_by` (name/updated_at), `descending`, `limit`, `offset` | read `sc_cat_item` |
+| `get_catalog_item` | `item_id`: 32-hex sys_id; returns the item, its variables and select-box choices | read `sc_cat_item`, `item_option_new`, `question_choice` |
+| `get_catalog_options` | optional `catalog` (sys_id), `limit`; returns active catalogs and categories, the variable types and (when catalog writes are on) the allowed record producer tables | read `sc_catalog`, `sc_category` |
 
 Write tools take the same strictly validated inputs plus `confirm` (default false = preview only); see the
 tool descriptions the server publishes, and [README.md](../README.md) for the safety model.

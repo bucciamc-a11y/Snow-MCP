@@ -78,3 +78,28 @@ Deliberately not done, to avoid over-engineering: no framework or decorator laye
 
 This shipped in the original compose file and was not caught earlier because the review environment could not run Docker;
 it was found on a real install and reproduced with `docker compose config`.
+
+---
+
+# Feature (2026-10-27): service catalog authoring
+
+New, off by default. `MCP_ENABLE_CATALOG_READ` adds `search_catalog_items`, `get_catalog_item`, `get_catalog_options`.
+`MCP_ENABLE_CATALOG_WRITES` (implies read) adds `create_catalog_item`, `create_record_producer`, `add_catalog_variables`.
+`MCP_PRODUCER_TARGET_TABLES` (default `incident`) limits where a record producer may create records.
+
+Design choices (each made to keep the existing safety model):
+
+* **Interview first.** The shared skill (`skills/_source/body.md`, all clients) tells the agent to interview the user about
+  type, name, location, every form question and, for producers, which column each answer fills, before any create tool.
+* **Always inactive.** Items and producers are created `active=false`; there is no activate tool. `add_catalog_variables`
+  refuses items that are live, so an agent can never change something clients can see.
+* **No scripts.** A record producer's answers are mapped to columns declaratively (`map_to_field` / `field`), so the agent
+  never writes executable server-side code.
+* **Closed vocabulary.** Eight variable types, strict name/table/column patterns, unknown keys rejected, producer target
+  tables from an administrator allowlist. No update or delete of catalog records exists in the client.
+* **Bounded builds.** One call creates the item, its variables and select-box choices, capped at the write rate limit
+  (default 20 records); a mid-way failure reports the draft's sys_id and how to continue (`partial_build`).
+
+Tests: `tests/test_catalog.py` (39 tests; the draft-only and live-item guards were mutation-checked). Total 750 passing.
+Not verified against a real instance: table and field names (`sc_cat_item_producer.table_name`, `item_option_new.map_to_field`
+/ `field`, variable type codes). Build one test item first and open it in ServiceNow.

@@ -63,6 +63,13 @@ APPROVER_FIELDS = "sys_id,approver,state,sysapproval,comments,sys_updated_on"
 ROTA_FIELDS = "sys_id,name,group,active,description,schedule,time_zone,sys_updated_on"
 ROSTER_FIELDS = "sys_id,name,rota,order,active,schedule,time_zone,sys_updated_on"
 MEMBER_FIELDS = "sys_id,member,roster,order,from,to,sys_updated_on"
+CATALOG_ITEM_FIELDS = (
+    "sys_id,name,short_description,description,category,sc_catalogs,active,sys_class_name,table_name,sys_updated_on"
+)
+CATALOG_FIELDS = "sys_id,title,description,active"
+CATEGORY_FIELDS = "sys_id,title,description,sc_catalog,parent,active"
+VARIABLE_FIELDS = "sys_id,name,question_text,type,mandatory,order,default_value,help_text,reference,map_to_field,field"
+CHOICE_FIELDS = "sys_id,question,text,value,order"
 _TEXT_FIELDS = {"description", "justification", "implementation_plan", "backout_plan", "test_plan",
                 "cause_notes", "workaround", "fix_notes"}
 
@@ -81,7 +88,8 @@ _WHOISONCALL_PATH = "/api/now/on_call_rota/whoisoncall"
 
 # What may be read, and what may be written. Anything else raises before a request is built.
 _READ_TABLES = {"incident", "change_request", "problem", "sysapproval_approver", "cmn_rota",
-                "cmn_rota_roster", "cmn_rota_member"}
+                "cmn_rota_roster", "cmn_rota_member", "sc_cat_item", "sc_catalog", "sc_category",
+                "item_option_new", "question_choice"}
 _WRITES = {
     ("POST", "incident"),
     ("PATCH", "incident"),
@@ -92,6 +100,10 @@ _WRITES = {
     ("PATCH", "sysapproval_approver"),
     ("POST", "cmn_rota_member"),
     ("PATCH", "cmn_rota_member"),
+    ("POST", "sc_cat_item"),
+    ("POST", "sc_cat_item_producer"),
+    ("POST", "item_option_new"),
+    ("POST", "question_choice"),
 }
 _SYS_ID_PATH_RE = re.compile(r"^[0-9a-f]{32}\Z")
 _SAFE_MESSAGE_RE = re.compile(r"[^\x20-\x7e]")
@@ -154,6 +166,14 @@ def _clean(record: dict[str, Any], max_text: int) -> dict[str, Any]:
             value = value[:max_text] + "…[truncated]"
         out["updated_at" if key == "sys_updated_on" else key] = value
     return out
+
+
+def _flat(result: Any) -> dict[str, str]:
+    """Raw record -> {field: str}, taking reference values from {"value": ...} wrappers."""
+    if not isinstance(result, dict) or not result.get("sys_id"):
+        raise NotFoundError
+    flat = {k: (v.get("value") if isinstance(v, dict) else v) for k, v in result.items()}
+    return {k: str(v) for k, v in flat.items() if v is not None}
 
 
 def _next_offset(offset: int, count: int, total: int | None, limit: int) -> int | None:
@@ -352,8 +372,8 @@ class ServiceNowClient:
         return [_clean(r, self._max_text) for r in rows if isinstance(r, dict)], total
 
     # -- shared helpers for the incident / problem / change tables -------------------------------------------
-    async def _search(self, table: str, key: str, search: Search) -> dict[str, Any]:
-        records, total = await self._list(table, search.query, _TABLES[table][1], search.limit, search.offset)
+    async def _search(self, table: str, key: str, search: Search, fields: str) -> dict[str, Any]:
+        records, total = await self._list(table, search.query, fields, search.limit, search.offset)
         return {
             "count": len(records),
             "total_count": total,
@@ -376,10 +396,7 @@ class ServiceNowClient:
             data, _ = await self._request("GET", table, params=params)
             rows = data["result"]
             result = rows[0] if isinstance(rows, list) and rows else None
-        if not isinstance(result, dict) or not result.get("sys_id"):
-            raise NotFoundError
-        flat = {k: (v.get("value") if isinstance(v, dict) else v) for k, v in result.items()}
-        return {k: str(v) for k, v in flat.items() if v is not None}
+        return _flat(result)
 
     async def _write(self, method: str, table: str, fields: dict[str, str], return_fields: str,
                      sys_id: str | None = None) -> dict[str, Any]:
@@ -400,7 +417,7 @@ class ServiceNowClient:
 
     # -- incident ----------------------------------------------------------------
     async def search_incidents(self, search: Search) -> dict[str, Any]:
-        return await self._search("incident", "incidents", search)
+        return await self._search("incident", "incidents", search, INCIDENT_FIELDS)
 
     async def get_incident_raw(self, identifier: str) -> dict[str, str]:
         return await self._get_raw("incident", identifier, "sys_id,number,state,assignment_group,problem_id")
@@ -414,7 +431,7 @@ class ServiceNowClient:
 
     # -- problem -----------------------------------------------------------------
     async def search_problems(self, search: Search) -> dict[str, Any]:
-        return await self._search("problem", "problems", search)
+        return await self._search("problem", "problems", search, PROBLEM_FIELDS)
 
     async def get_problem_raw(self, identifier: str) -> dict[str, str]:
         return await self._get_raw("problem", identifier, "sys_id,number,state,assignment_group")
@@ -436,7 +453,7 @@ class ServiceNowClient:
 
     # -- change request ------------------------------------------------------------
     async def search_change_requests(self, search: Search) -> dict[str, Any]:
-        return await self._search("change_request", "change_requests", search)
+        return await self._search("change_request", "change_requests", search, CHANGE_FIELDS)
 
     async def get_change_raw(self, identifier: str) -> dict[str, str]:
         return await self._get_raw("change_request", identifier, "sys_id,number,state,type,approval")
@@ -447,6 +464,69 @@ class ServiceNowClient:
     async def update_change(self, sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
         validate_sys_id(sys_id, "sys_id")
         return await self._write("PATCH", "change_request", fields, CHANGE_FIELDS, sys_id)
+
+    # -- service catalog -----------------------------------------------------------
+    async def search_catalog_items(self, search: Search) -> dict[str, Any]:
+        return await self._search("sc_cat_item", "items", search, CATALOG_ITEM_FIELDS)
+
+    async def catalog_options(self, catalog: str | None, limit: int) -> dict[str, Any]:
+        """Catalogs plus categories (optionally one catalog's) - the places a new item can be put."""
+        if catalog:
+            validate_sys_id(catalog, "catalog")
+        catalogs, _ = await self._list("sc_catalog", "active=true^ORDERBYtitle", CATALOG_FIELDS, 25)
+        query = (f"sc_catalog={catalog}^" if catalog else "") + "active=true^ORDERBYtitle"
+        categories, _ = await self._list("sc_category", query, CATEGORY_FIELDS, limit)
+        return {"catalogs": catalogs, "categories": categories}
+
+    async def get_catalog_item(self, item_sys_id: str) -> dict[str, Any]:
+        """One item or record producer with its form variables (select boxes include their choices)."""
+        validate_sys_id(item_sys_id, "item_id")
+        data, _ = await self._request("GET", "sc_cat_item", sys_id=item_sys_id,
+                                      params=self._display_params(CATALOG_ITEM_FIELDS))
+        item = self._one(data)
+        variables, _ = await self._list("item_option_new", f"cat_item={item_sys_id}^ORDERBYorder", VARIABLE_FIELDS, 100)
+        raw = {"sysparm_fields": "question,text,value,order", "sysparm_display_value": "false",
+               "sysparm_exclude_reference_link": "true", "sysparm_limit": "500",
+               "sysparm_query": f"question.cat_item={item_sys_id}^ORDERBYorder"}
+        try:
+            data, _ = await self._request("GET", "question_choice", params=raw)
+        except NotFoundError:
+            data = {"result": []}
+        by_question: dict[str, list[dict[str, str]]] = {}
+        for row in data["result"] if isinstance(data["result"], list) else []:
+            if isinstance(row, dict) and row.get("question"):
+                by_question.setdefault(str(row["question"]), []).append(
+                    {"text": str(row.get("text", "")), "value": str(row.get("value", ""))})
+        for var in variables:
+            if var.get("sys_id") in by_question:
+                var["choices"] = by_question[var["sys_id"]]
+        return {"item": item, "variables": variables, "variable_count": len(variables)}
+
+    async def get_catalog_item_raw(self, item_sys_id: str) -> dict[str, str]:
+        """Raw sys_id / active / class of an item, used for the draft-only write guard."""
+        validate_sys_id(item_sys_id, "item_id")
+        params = {"sysparm_fields": "sys_id,active,sys_class_name", "sysparm_display_value": "false",
+                  "sysparm_exclude_reference_link": "true"}
+        data, _ = await self._request("GET", "sc_cat_item", sys_id=item_sys_id, params=params)
+        return _flat(data["result"])
+
+    async def last_variable_order(self, item_sys_id: str) -> int:
+        rows, _ = await self._list("item_option_new", f"cat_item={validate_sys_id(item_sys_id, 'item_id')}"
+                                   "^ORDERBYDESCorder", "order", 1)
+        order = rows[0].get("order", "") if rows else ""
+        return int(order) if str(order).isdigit() else 0
+
+    async def create_catalog_item(self, table: str, fields: dict[str, str]) -> dict[str, Any]:
+        """``table`` is sc_cat_item (catalog item) or sc_cat_item_producer (record producer)."""
+        return await self._write("POST", table, fields, CATALOG_ITEM_FIELDS)
+
+    async def create_variable(self, item_sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
+        validate_sys_id(item_sys_id, "item_id")
+        return await self._write("POST", "item_option_new", {**fields, "cat_item": item_sys_id}, VARIABLE_FIELDS)
+
+    async def create_choice(self, variable_sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
+        validate_sys_id(variable_sys_id, "variable_id")
+        return await self._write("POST", "question_choice", {**fields, "question": variable_sys_id}, CHOICE_FIELDS)
 
     # -- change approval ---------------------------------------------------------
     async def find_approval_ids(self, change_sys_id: str, username: str) -> list[str]:
