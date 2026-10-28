@@ -33,3 +33,5 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+# the ITSM skill is a standalone, stdlib-only package with its own tests and style
+extend-exclude = ["skills/hermes/servicenow-itsm"]

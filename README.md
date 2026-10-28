@@ -140,6 +140,8 @@ steps and the ServiceNow-side prerequisites are in [INSTALL.md](INSTALL.md).
 setup.sh                 single entry point (Docker or systemd)
 scripts/                 install, configure, docker-setup, check, hermes-instructions, uninstall
 src/servicenow_mcp/      server, config, validation, ServiceNow client, auth, CLI
+skills/hermes/servicenow-itsm/   the ITSM operator skill (triage, change drafting, QA, problems) with its own tests:
+                         cd skills/hermes/servicenow-itsm && python3 -m unittest discover -s tests
 tests/                   pytest suite (ServiceNow is mocked)
 config/  docker/  deploy/  example config, Docker Compose, systemd unit
 skills/                  agent skills per client (generated from skills/_source) + build.py
