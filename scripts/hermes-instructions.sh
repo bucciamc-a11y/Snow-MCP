@@ -21,6 +21,8 @@ if flag MCP_ENABLE_INCIDENT_ASSIGNMENT; then INCLUDE+=", list_assignment_teams, 
 if flag MCP_ENABLE_CHANGE_APPROVAL; then INCLUDE+=", approve_change_request"; WRITES=1; fi
 if flag MCP_ENABLE_ONCALL_READ || flag MCP_ENABLE_ONCALL_WRITES; then INCLUDE+=", list_oncall_rotas, get_oncall_roster, whois_oncall"; fi
 if flag MCP_ENABLE_ONCALL_WRITES; then INCLUDE+=", add_oncall_member, update_oncall_member"; WRITES=1; fi
+if flag MCP_ENABLE_JOURNAL_READ; then INCLUDE+=", get_journal"; fi
+if flag MCP_ENABLE_CMDB_READ; then INCLUDE+=", search_cis"; fi
 if flag MCP_ENABLE_PROBLEM_READ || flag MCP_ENABLE_PROBLEM_WRITES; then INCLUDE+=", search_problems, get_problem"; fi
 if flag MCP_ENABLE_PROBLEM_WRITES; then
   INCLUDE+=", create_problem, update_problem, resolve_problem, link_incident_to_problem"; WRITES=1

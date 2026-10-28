@@ -167,6 +167,8 @@ if [[ $EN_APPR == true ]]; then
 fi
 yesno "Allow reading the on-call schedule (rotas, rosters, who is on call)?" MCP_ENABLE_ONCALL_READ; EN_OCR=$REPLY
 yesno "Allow editing on-call roster members (add member, change order/valid dates)?" MCP_ENABLE_ONCALL_WRITES; EN_OCW=$REPLY
+yesno "Allow reading work notes and comments (get_journal)?" MCP_ENABLE_JOURNAL_READ; EN_JRN=$REPLY
+yesno "Allow looking up configuration items (search_cis)?" MCP_ENABLE_CMDB_READ; EN_CMDB=$REPLY
 yesno "Allow reading problem records (search_problems, get_problem)?" MCP_ENABLE_PROBLEM_READ; EN_PRBR=$REPLY
 yesno "Allow problem management writes (create / update / resolve problems, link incidents to a problem)?" MCP_ENABLE_PROBLEM_WRITES; EN_PRBW=$REPLY
 PRB_STATES="$(existing_value "$CONF" MCP_PROBLEM_STATES | grep . || echo "new=101;assess=102;root_cause_analysis=103;fix_in_progress=104;resolved=106;closed=107")"
@@ -220,6 +222,8 @@ MCP_ENABLE_CHANGE_APPROVAL=$EN_APPR
 MCP_APPROVAL_ALLOWED_TYPES=$APPR_TYPES
 MCP_ENABLE_ONCALL_READ=$EN_OCR
 MCP_ENABLE_ONCALL_WRITES=$EN_OCW
+MCP_ENABLE_JOURNAL_READ=$EN_JRN
+MCP_ENABLE_CMDB_READ=$EN_CMDB
 MCP_ENABLE_PROBLEM_READ=$EN_PRBR
 MCP_ENABLE_PROBLEM_WRITES=$EN_PRBW
 MCP_PROBLEM_STATES="$PRB_STATES"

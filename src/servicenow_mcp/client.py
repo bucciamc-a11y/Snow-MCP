@@ -32,6 +32,7 @@ from .validation import (
     INCIDENT_NUMBER_RE,
     PROBLEM_NUMBER_RE,
     Search,
+    ValidationError,
     validate_identifier,
     validate_sys_id,
 )
@@ -45,7 +46,7 @@ MAX_RETRIES = 2
 INCIDENT_FIELDS = (
     "sys_id,number,short_description,description,state,priority,urgency,impact,category,"
     "subcategory,caller_id,assigned_to,assignment_group,business_service,cmdb_ci,active,"
-    "opened_at,opened_by,sys_updated_on,resolved_at,closed_at,close_code,problem_id"
+    "opened_at,opened_by,sys_updated_on,resolved_at,closed_at,close_code,close_notes,problem_id"
 )
 PROBLEM_FIELDS = (
     "sys_id,number,short_description,description,state,priority,urgency,impact,category,subcategory,"
@@ -57,14 +58,17 @@ CHANGE_FIELDS = (
     "sys_id,number,short_description,description,state,type,priority,risk,impact,category,"
     "requested_by,assigned_to,assignment_group,business_service,cmdb_ci,approval,justification,"
     "implementation_plan,backout_plan,test_plan,start_date,end_date,opened_at,sys_updated_on,closed_at,"
-    "close_code,active"
+    "close_code,close_notes,active"
 )
+JOURNAL_FIELDS = "sys_created_on,sys_created_by,element,value"  # work notes / comments
+CI_FIELDS = "sys_id,name,sys_class_name,operational_status,install_status,support_group,sys_updated_on"
 APPROVER_FIELDS = "sys_id,approver,state,sysapproval,comments,sys_updated_on"
 ROTA_FIELDS = "sys_id,name,group,active,description,schedule,time_zone,sys_updated_on"
 ROSTER_FIELDS = "sys_id,name,rota,order,active,schedule,time_zone,sys_updated_on"
 MEMBER_FIELDS = "sys_id,member,roster,order,from,to,sys_updated_on"
 _TEXT_FIELDS = {"description", "justification", "implementation_plan", "backout_plan", "test_plan",
-                "cause_notes", "workaround", "fix_notes"}
+                "cause_notes", "workaround", "fix_notes",
+                "close_notes", "value"}
 
 _TABLES = {
     "incident": ("/api/now/table/incident", INCIDENT_FIELDS, INCIDENT_NUMBER_RE, "incident"),
@@ -77,11 +81,14 @@ _TABLES = {
     "problem": ("/api/now/table/problem", PROBLEM_FIELDS, PROBLEM_NUMBER_RE, "problem"),
 }
 _TABLE_PATH = "/api/now/table/"
+# Journal reads: record-number prefix -> table, and the journal elements a caller may ask for.
+_JOURNAL_TABLES = {"INC": "incident", "PRB": "problem", "CHG": "change_request"}
+_JOURNAL_ELEMENTS = {"work_notes": "work_notes", "comments": "comments", "both": "work_notes,comments"}
 _WHOISONCALL_PATH = "/api/now/on_call_rota/whoisoncall"
 
 # What may be read, and what may be written. Anything else raises before a request is built.
 _READ_TABLES = {"incident", "change_request", "problem", "sysapproval_approver", "cmn_rota",
-                "cmn_rota_roster", "cmn_rota_member"}
+                "cmn_rota_roster", "cmn_rota_member", "sys_journal_field", "cmdb_ci"}
 _WRITES = {
     ("POST", "incident"),
     ("PATCH", "incident"),
@@ -509,6 +516,27 @@ class ServiceNowClient:
     async def update_member(self, member_sys_id: str, fields: dict[str, str]) -> dict[str, Any]:
         validate_sys_id(member_sys_id, "member_record_id")
         return await self._write("PATCH", "cmn_rota_member", fields, MEMBER_FIELDS, member_sys_id)
+
+    # -- journal (work notes / comments) and CMDB lookups: read only -------------------------------------
+    async def get_journal(self, identifier: str, field: str, limit: int, offset: int) -> dict[str, Any]:
+        """Work notes and/or comments of one incident, problem or change, oldest first."""
+        number = identifier.strip().upper() if isinstance(identifier, str) else ""
+        table = _JOURNAL_TABLES.get(number[:3])
+        if table is None:
+            raise ValidationError("identifier must be an incident, problem or change number (INC/PRB/CHG...)")
+        if field not in _JOURNAL_ELEMENTS:
+            raise ValidationError("field must be one of: " + ", ".join(_JOURNAL_ELEMENTS))
+        record = await self.get_record(table, number)  # also validates the number format and that it exists
+        query = (f"name={table}^element_id={record['sys_id']}^elementIN{_JOURNAL_ELEMENTS[field]}"
+                 "^ORDERBYsys_created_on")
+        rows, total = await self._list("sys_journal_field", query, JOURNAL_FIELDS, limit, offset)
+        return {"record": number, "count": len(rows), "total_count": total, "offset": offset,
+                "next_offset": _next_offset(offset, len(rows), total, limit), "entries": rows}
+
+    async def search_cis(self, search: Search) -> dict[str, Any]:
+        rows, total = await self._list("cmdb_ci", search.query, CI_FIELDS, search.limit, search.offset)
+        return {"count": len(rows), "total_count": total, "offset": search.offset,
+                "next_offset": _next_offset(search.offset, len(rows), total, search.limit), "cis": rows}
 
     # -- connectivity check ------------------------------------------------------
     async def check_connectivity(self, tables: tuple[str, ...] = ("incident", "change_request")) -> dict[str, str]:

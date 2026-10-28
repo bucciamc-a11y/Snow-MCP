@@ -220,6 +220,8 @@ class Settings:
     enable_change_approval: bool = False  # approve_change_request
     enable_oncall_read: bool = False  # list_oncall_rotas, get_oncall_roster, whois_oncall
     enable_oncall_writes: bool = False  # add_oncall_member, update_oncall_member
+    enable_journal_read: bool = False  # get_journal (work notes / comments of incidents, problems, changes)
+    enable_cmdb_read: bool = False  # search_cis (read-only CI lookup)
     enable_problem_read: bool = False  # search_problems, get_problem
     enable_problem_writes: bool = False  # create/update/resolve_problem, link_incident_to_problem (implies read)
     problem_states: tuple[tuple[str, str], ...] = DEFAULT_PROBLEM_STATES  # state name -> raw ServiceNow value
@@ -337,6 +339,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         enable_change_approval=enable_approval,
         enable_oncall_read=_bool(env, "MCP_ENABLE_ONCALL_READ") or oncall_writes,
         enable_oncall_writes=oncall_writes,
+        enable_journal_read=_bool(env, "MCP_ENABLE_JOURNAL_READ"),
+        enable_cmdb_read=_bool(env, "MCP_ENABLE_CMDB_READ"),
         enable_problem_read=_bool(env, "MCP_ENABLE_PROBLEM_READ") or problem_writes,
         enable_problem_writes=problem_writes,
         problem_states=problem_states,

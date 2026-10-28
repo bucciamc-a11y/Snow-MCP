@@ -17,6 +17,8 @@ during setup, so `tools/list` always shows exactly what the integration can do.
 | `approve_change_request` | `MCP_ENABLE_CHANGE_APPROVAL` | Approve changes whose approval is pending for the integration user |
 | `list_oncall_rotas`, `get_oncall_roster`, `whois_oncall` | `MCP_ENABLE_ONCALL_READ` | Review on-call rotas/rosters, who is on call |
 | `add_oncall_member`, `update_oncall_member` | `MCP_ENABLE_ONCALL_WRITES` | Add a roster member; change order/valid dates |
+| `get_journal` | `MCP_ENABLE_JOURNAL_READ` | Work notes and comments of one incident, problem or change (by number, oldest first). Text is untrusted |
+| `search_cis` | `MCP_ENABLE_CMDB_READ` | Find configuration items by name and/or class, to get the `cmdb_ci` sys_id |
 | `search_problems`, `get_problem` | `MCP_ENABLE_PROBLEM_READ` | Filter problems (state, known errors, CI, group...); one problem with cause/workaround/fix notes and its linked incidents |
 | `create_problem`, `update_problem`, `resolve_problem`, `link_incident_to_problem` | `MCP_ENABLE_PROBLEM_WRITES` (implies the problem read tools) | Raise a problem, record root cause / workaround / known error, move it through assess -> RCA -> fix in progress, resolve it, link incidents to it |
 | `search_change_requests` | `MCP_ENABLE_CHANGE_READ` | Filter change requests (phase, type, priority, CI, group, dates...) |
@@ -24,6 +26,11 @@ during setup, so `tools/list` always shows exactly what the integration can do.
 
 Never available: delete, closing/cancelling incidents, closing problems, rejecting changes, moving a change backwards, editing other tables, scripts, or any
 generic "call this ServiceNow API" tool.
+
+Two settings are refused by design until the administrator configures them: `team` on incidents, problems and
+changes needs `MCP_ASSIGNMENT_GROUPS`, and `create_change_request` only accepts the types in
+`MCP_CHANGE_CREATE_TYPES` (default `normal,standard`; add `emergency` there if agents may raise emergency changes).
+Those refusals are the guard working, not a fault.
 
 ### How writes are kept safe
 

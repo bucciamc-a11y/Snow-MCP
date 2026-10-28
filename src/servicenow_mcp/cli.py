@@ -34,6 +34,10 @@ async def _check() -> int:
             tables.append("sysapproval_approver")
         if _bool(os.environ, "MCP_ENABLE_ONCALL_READ") or _bool(os.environ, "MCP_ENABLE_ONCALL_WRITES"):
             tables += ["cmn_rota", "cmn_rota_roster", "cmn_rota_member"]
+        if _bool(os.environ, "MCP_ENABLE_JOURNAL_READ"):
+            tables.append("sys_journal_field")
+        if _bool(os.environ, "MCP_ENABLE_CMDB_READ"):
+            tables.append("cmdb_ci")
         if _bool(os.environ, "MCP_ENABLE_PROBLEM_READ") or _bool(os.environ, "MCP_ENABLE_PROBLEM_WRITES"):
             tables.append("problem")
         results = await client.check_connectivity(tuple(tables))

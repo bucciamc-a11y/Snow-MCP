@@ -190,6 +190,26 @@ def build_incident_search(
     return _finish_search(clauses, ORDER_FIELDS, order_by, descending, limit, offset, max_limit)
 
 
+_CI_CLASS_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}\Z")
+
+
+def build_ci_search(*, name_contains: str | None = None, ci_class: str | None = None, limit: int = 10,
+                    offset: int = 0, max_limit: int = 50) -> Search:
+    """CMDB CI lookup by name substring and/or class (e.g. cmdb_ci_server). One filter is required so the
+    agent can never page through the whole CMDB."""
+    clauses: list[str] = []
+    if name_contains is not None:
+        clauses.append(f"nameLIKE{_text(name_contains, 'name_contains')}")
+    if ci_class is not None:
+        cls = ci_class.strip() if isinstance(ci_class, str) else ""
+        if not _CI_CLASS_RE.match(cls):
+            raise ValidationError("ci_class must be a table name such as cmdb_ci_server")
+        clauses.append(f"sys_class_name={cls}")
+    if not clauses:
+        raise ValidationError("provide name_contains or ci_class")
+    return _finish_search(clauses, {"name": "name"}, "name", False, limit, offset, max_limit)
+
+
 # ---------------------------------------------------------------------------
 # Write-side validation. Values here travel in a JSON request body (never in an
 # encoded query), but are still constrained to closed vocabularies / strict patterns.
