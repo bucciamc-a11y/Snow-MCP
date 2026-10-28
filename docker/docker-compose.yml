@@ -55,7 +55,8 @@ services:
       traefik.http.routers.servicenow-mcp.middlewares: servicenow-mcp-limit
     # --- hardening ---
     read_only: true
-    tmpfs: [/tmp:size=16m,mode=1777]
+    # one option only: compose splits a comma-separated tmpfs entry into separate mounts; tmpfs defaults to mode 1777
+    tmpfs: [/tmp:size=16m]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 64

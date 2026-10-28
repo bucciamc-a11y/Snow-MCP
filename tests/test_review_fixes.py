@@ -129,3 +129,13 @@ def test_configure_script_never_assigns_a_privileged_port():
     for value in re.findall(r"^\s*PORT=(\d+)\s*$", script, flags=re.MULTILINE):
         assert int(value) >= 1024, f"configure.sh sets PORT={value}, which the service cannot bind"
     assert "PORT=443" not in script
+
+
+# --- 6. compose splits a comma-separated tmpfs entry into separate (invalid) mounts --------------------------
+def test_compose_tmpfs_entries_are_single_absolute_paths():
+    text = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
+    entries = re.findall(r"^\s*tmpfs:\s*\[(.*)\]\s*$", text, flags=re.MULTILINE)
+    assert entries, "expected a tmpfs line"
+    for entry in entries:
+        assert "," not in entry, f"tmpfs entry {entry!r} would be split into several mounts by docker compose"
+        assert entry.strip().startswith("/")

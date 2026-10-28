@@ -67,3 +67,14 @@ About 100 fewer lines (+210 / -308).
 Deliberately not done, to avoid over-engineering: no framework or decorator layer for the MCP tool definitions
 (the repeated `params = {...}` audit dictionaries are explicit and easy to read), and the config helpers `_int` and
 `_float` stay separate.
+
+---
+
+# Hotfix (2026-10-27): container would not start
+
+| Where | Problem | Fix |
+|---|---|---|
+| `docker/docker-compose.yml` | `tmpfs: [/tmp:size=16m,mode=1777]` is split at the comma by Docker Compose (v5.6.1 tested) into two mounts, `/tmp:size=16m` and `mode=1777`, and Docker rejects the second with "invalid mount path: 'mode=1777' mount path must be absolute". Neither the connectivity check nor the container could start. | Single option, `tmpfs: [/tmp:size=16m]` (tmpfs already defaults to mode 1777). Regression test `test_compose_tmpfs_entries_are_single_absolute_paths`. |
+
+This shipped in the original compose file and was not caught earlier because the review environment could not run Docker;
+it was found on a real install and reproduced with `docker compose config`.
