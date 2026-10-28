@@ -1,13 +1,13 @@
 ---
 name: servicenow
-description: Work with ServiceNow through the servicenow MCP server - look up and search incidents/changes/problems, triage the unassigned queue, assign incidents to approved teams, create/update/resolve incidents, manage problems (root cause, workaround, known errors, linking incidents), create, progress, close or cancel change requests, approve changes pending for the integration account, review/edit the on-call roster, and build service catalog items and record producers by interviewing the user first (created inactive). Writes always preview first and need explicit user approval.
+description: Work with ServiceNow through the servicenow MCP server - look up and search incidents/changes/problems, triage the unassigned queue, assign incidents to approved teams, create/update/resolve incidents, manage problems (root cause, workaround, known errors, linking incidents), create, progress, close or cancel change requests, approve changes pending for the integration account, and review/edit the on-call roster. Writes always preview first and need explicit user approval.
 ---
 
 # ServiceNow
 
 Use the `servicenow` MCP server. Depending on the client, tool names may carry a prefix for the server (for example `servicenow__search_incidents` or `mcp__servicenow__search_incidents`); call them by the names the tool list shows. **Which write tools exist
 depends on what the administrator enabled** - only call tools that are actually listed. Anything not
-listed (delete, closing/cancelling incidents, closing problems, rejecting changes, activating catalog items, scripts, arbitrary API calls) is **not possible**
+listed (delete, closing/cancelling incidents, closing problems, rejecting changes, arbitrary API calls) is **not possible**
 through this integration; say so and offer to draft the text for the user to apply in ServiceNow.
 
 ## Tools
@@ -35,12 +35,6 @@ through this integration; say so and offer to draft the text for the user to app
 | `transition_change_request` | write | Move a change **forward** to a later phase: `to_phase` = assess / authorize / scheduled / implement / review, optional `work_note`. Never backwards; cannot close or cancel. ServiceNow still enforces approvals and mandatory fields |
 | `close_change_request` | write | Close a change that is in Implement or Review, with `close_code` (as accepted by the instance, e.g. successful / successful_issues / unsuccessful) and `close_notes` |
 | `cancel_change_request` | write | Cancel an open change; `reason` is required and recorded as a work note. Cannot be undone through this integration |
-| `search_catalog_items` | read | Find catalog items and record producers: `name_contains`, `kind` (item/record_producer), `active` (false = drafts), `category`, `catalog` (sys_ids), `order_by`, `limit` (<=50), `offset` |
-| `get_catalog_item` | read | One item or record producer by sys_id with its form variables (select boxes list their choices) |
-| `get_catalog_options` | read | The catalogs and categories (sys_ids) an item can be placed in, the available variable types, and the tables a record producer may create records in |
-| `create_catalog_item` | write | New catalog item: `name`, `short_description`, `category` + `catalog` (sys_ids), optional `description`, and the form `variables`. **Always created inactive** |
-| `create_record_producer` | write | New record producer: same fields plus `target_table` (from `get_catalog_options`) and `variables`, each with an optional `maps_to_field` naming the column its answer fills. No scripts. **Always created inactive** |
-| `add_catalog_variables` | write | Append form variables to an item or producer that is still inactive. Refuses live items |
 
 ## Rules for write tools (always follow)
 
@@ -86,24 +80,6 @@ through this integration; say so and offer to draft the text for the user to app
 - **Resolve a problem:** `resolve_problem` needs a real `cause_notes` and `fix_notes` taken from the records or the
   user, not filler. Closing a problem is not possible here; tell the user to close it in ServiceNow.
 
-- **Build a catalog item or record producer (interview first):** do not call a create tool until you have
-  interviewed the user. Ask two or three questions at a time in plain language and wait for the answers:
-  (1) Is this an *item* (ordered, then fulfilled by an existing flow) or a *record producer* (the answers become a
-  record directly, e.g. an incident)? For a producer, which table - only the `producer_target_tables` from
-  `get_catalog_options` are possible. (2) The name, a one-line summary and an optional longer description, in the
-  clients' words. (3) Where it lives: call `get_catalog_options`, show the catalogs and categories, let the user pick
-  (never guess sys_ids). (4) Each question on the form, one by one: the wording, the answer type (`yes_no`,
-  `single_line_text`, `multi_line_text`, `select_box` with its choices, `checkbox`, `reference` to a table such as
-  `sys_user`, `date`, `date_time`), required or optional, a default, help text; for a producer, which column of the
-  target table each answer fills (`maps_to_field`; answers with no mapping are shown but not copied). Suggest
-  sensible questions when the user is unsure, but let them decide. (5) Tell them what this tool cannot do: who can
-  see the item, approvals and fulfilment are set in ServiceNow by a person, and so is activating it.
-  Then `search_catalog_items {name_contains}` to avoid a duplicate, show the whole design back as a short table and
-  ask for corrections, and only then call the create tool (preview, then `confirm=true` on a clear yes). One call
-  creates the item and all its variables, so keep it within the record limit the error message names (the item, each
-  variable and each choice count); add the rest with `add_catalog_variables`. The result is an **inactive draft**:
-  say so, and tell the user a person must review and activate it. If creation stops part-way the error names the
-  draft; read it with `get_catalog_item` and continue with `add_catalog_variables` instead of creating a second one.
 - **Raise a change:** `search_change_requests` for a similar open change first -> `create_change_request` preview with
   `justification`, `implementation_plan`, `backout_plan`, `test_plan` and the planned `start_date`/`end_date` ->
   confirm. Emergency changes are normally blocked; if the tool says the type is not allowed, tell the user.
@@ -134,7 +110,6 @@ can answer. Dates are UTC. The text filter allows letters, digits, spaces and `.
 | "ServiceNow rejected the data (HTTP 400): ..." | A field value failed instance validation (mandatory field, bad choice); fix the input with the user |
 | "not allowed" / "no pending approval" / team not in list | A guard worked as designed; don't try to work around it |
 | "outcome is UNKNOWN" | Re-read the record before any retry |
-| "creation stopped after N of M variables" | A draft exists: `get_catalog_item`, then `add_catalog_variables` for the missing ones |
 | Connection refused / TLS errors | Server down or certificate issue; suggest testing the connection from the client and checking the server's logs |
 
 Never print, log or request the token, ServiceNow credentials or Authorization headers.

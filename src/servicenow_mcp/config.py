@@ -115,7 +115,6 @@ DEFAULT_CHANGE_STATES = (
 _CHANGE_STATE_VALUE_RE = re.compile(r"^-?\d{1,4}\Z")
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9._@-]{1,80}\Z")
 _TYPE_RE = re.compile(r"^[a-z][a-z _-]{0,30}\Z")
-_TABLE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}\Z")
 _TEAM_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.&-]{0,59}\Z")
 _SYS_ID_RE = re.compile(r"^[0-9a-f]{32}\Z")
 
@@ -230,9 +229,6 @@ class Settings:
     change_create_types: tuple[str, ...] = ("normal", "standard")  # types an agent may create
     assignment_teams: tuple[tuple[str, str], ...] = ()  # (display name, group sys_id) allowlist
     approval_allowed_types: tuple[str, ...] = ("standard", "normal")
-    enable_catalog_read: bool = False  # search_catalog_items, get_catalog_item, get_catalog_options
-    enable_catalog_writes: bool = False  # create_catalog_item, create_record_producer, add_catalog_variables (implies read)
-    producer_target_tables: tuple[str, ...] = ("incident",)  # tables a record producer may create records in
     write_rate_limit_per_minute: int = 20
 
     @property
@@ -335,11 +331,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if change_writes and (not create_types or not all(_TYPE_RE.match(t) for t in create_types)):
         raise ConfigError("MCP_CHANGE_CREATE_TYPES must be a comma list such as normal,standard")
 
-    catalog_writes = _bool(env, "MCP_ENABLE_CATALOG_WRITES")
-    targets = tuple(t.strip().lower() for t in env.get("MCP_PRODUCER_TARGET_TABLES", "incident").split(",") if t.strip())
-    if catalog_writes and (not targets or not all(_TABLE_NAME_RE.match(t) for t in targets)):
-        raise ConfigError("MCP_PRODUCER_TARGET_TABLES must be a comma list of table names such as incident")
-
     return Settings(
         enable_incident_writes=_bool(env, "MCP_ENABLE_INCIDENT_WRITES"),
         enable_incident_assignment=enable_assignment,
@@ -353,9 +344,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         enable_change_writes=change_writes,
         change_states=change_states,
         change_create_types=create_types or ("normal", "standard"),
-        enable_catalog_read=_bool(env, "MCP_ENABLE_CATALOG_READ") or catalog_writes,
-        enable_catalog_writes=catalog_writes,
-        producer_target_tables=targets or ("incident",),
         assignment_teams=teams,
         approval_allowed_types=types or ("standard", "normal"),
         write_rate_limit_per_minute=_int(env, "MCP_WRITE_RATE_LIMIT_PER_MINUTE", 20, 1, 300),

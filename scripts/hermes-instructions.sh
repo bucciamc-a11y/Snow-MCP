@@ -29,12 +29,6 @@ if flag MCP_ENABLE_CHANGE_READ || flag MCP_ENABLE_CHANGE_WRITES; then INCLUDE+="
 if flag MCP_ENABLE_CHANGE_WRITES; then
   INCLUDE+=", create_change_request, update_change_request, transition_change_request, close_change_request, cancel_change_request"; WRITES=1
 fi
-if flag MCP_ENABLE_CATALOG_READ || flag MCP_ENABLE_CATALOG_WRITES; then
-  INCLUDE+=", search_catalog_items, get_catalog_item, get_catalog_options"
-fi
-if flag MCP_ENABLE_CATALOG_WRITES; then
-  INCLUDE+=", create_catalog_item, create_record_producer, add_catalog_variables"; WRITES=1
-fi
 WRITE_NOTE=""
 [[ -n $WRITES ]] && WRITE_NOTE=" Write tools preview first; they change nothing until called again with confirm=true.
     Keep Hermes' own tool-approval prompts ON for the write tools so a human approves each change."

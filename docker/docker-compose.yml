@@ -35,9 +35,6 @@ services:
       MCP_ENABLE_CHANGE_WRITES: ${MCP_ENABLE_CHANGE_WRITES:-false}
       MCP_CHANGE_CREATE_TYPES: ${MCP_CHANGE_CREATE_TYPES:-normal,standard}
       MCP_CHANGE_STATES: ${MCP_CHANGE_STATES:-}
-      MCP_ENABLE_CATALOG_READ: ${MCP_ENABLE_CATALOG_READ:-false}
-      MCP_ENABLE_CATALOG_WRITES: ${MCP_ENABLE_CATALOG_WRITES:-false}
-      MCP_PRODUCER_TARGET_TABLES: ${MCP_PRODUCER_TARGET_TABLES:-incident}
       SERVICENOW_USERNAME_FILE: /run/secrets/servicenow_username
       SERVICENOW_PASSWORD_FILE: /run/secrets/servicenow_password
       MCP_AUTH_TOKEN_SHA256_FILE: /run/secrets/mcp_auth_token_sha256

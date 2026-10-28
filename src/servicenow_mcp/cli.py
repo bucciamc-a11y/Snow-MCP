@@ -36,8 +36,6 @@ async def _check() -> int:
             tables += ["cmn_rota", "cmn_rota_roster", "cmn_rota_member"]
         if _bool(os.environ, "MCP_ENABLE_PROBLEM_READ") or _bool(os.environ, "MCP_ENABLE_PROBLEM_WRITES"):
             tables.append("problem")
-        if _bool(os.environ, "MCP_ENABLE_CATALOG_READ") or _bool(os.environ, "MCP_ENABLE_CATALOG_WRITES"):
-            tables += ["sc_cat_item", "sc_category", "item_option_new"]
         results = await client.check_connectivity(tuple(tables))
     finally:
         await client.aclose()
