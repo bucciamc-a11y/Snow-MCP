@@ -34,8 +34,9 @@ def fake_sn(journal_text="Rebooted the gateway"):
             rows = [{"sys_created_on": "2026-10-01 10:00:00", "sys_created_by": "jdoe",
                      "element": "work_notes", "value": journal_text}]
             return httpx.Response(200, json={"result": rows}, headers={"X-Total-Count": "1"})
-        if table == "cmdb_ci":
-            rows = [{"sys_id": "6" * 32, "name": "web-01", "sys_class_name": "Linux Server"}]
+        if table.startswith("cmdb_ci"):
+            rows = [{"sys_id": "6" * 32, "name": "web-01", "sys_class_name": "Linux Server",
+                     "ip_address": "10.0.0.5", "os": "Linux", "comments": ""}]
             return httpx.Response(200, json={"result": rows}, headers={"X-Total-Count": "1"})
         return httpx.Response(404, json={"error": {"message": "no"}})
 
@@ -113,10 +114,12 @@ async def test_journal_rejects_unknown_field():
 def test_ci_search_query():
     s = build_ci_search(name_contains="web-01", ci_class="cmdb_ci_server", limit=5)
     assert s.query == "nameLIKEweb-01^sys_class_name=cmdb_ci_server^ORDERBYname" and s.limit == 5
+    assert s.table == "cmdb_ci_server"
+    assert build_ci_search(name_contains="web-01").table == "cmdb_ci"
 
 
 @pytest.mark.parametrize("kwargs", [
-    {}, {"name_contains": "a^ORb"}, {"ci_class": "cmdb_ci^ORactive=true"}, {"ci_class": "Server"},
+    {}, {"name_contains": "a^ORb"}, {"ci_class": "cmdb_ci^ORactive=true"}, {"ci_class": "Server"}, {"ci_class": "incident"}, {"ci_class": "sys_user"},
     {"name_contains": "web", "limit": 1000},
 ])
 def test_ci_search_rejects_bad_input(kwargs):
@@ -132,7 +135,14 @@ async def test_tools_end_to_end():
         assert res["record"] == "INC0010001" and res["entries"][0]["element"] == "work_notes"
         res = await call(c, "search_cis", {"name_contains": "web", "ci_class": "cmdb_ci_server"})
         assert res["cis"][0]["name"] == "web-01"
-        assert dict(h.calls[-1].url.params)["sysparm_query"] == "nameLIKEweb^sys_class_name=cmdb_ci_server^ORDERBYname"
+        # all CI data: class-specific fields come back, empty ones are dropped
+        assert res["cis"][0]["ip_address"] == "10.0.0.5" and "comments" not in res["cis"][0]
+        last = h.calls[-1]
+        assert last.url.path.split("/")[4] == "cmdb_ci_server"  # class table, for its specific columns
+        assert "sysparm_fields" not in dict(last.url.params)  # no field list -> every column
+        assert dict(last.url.params)["sysparm_query"] == "nameLIKEweb^sys_class_name=cmdb_ci_server^ORDERBYname"
+        await call(c, "search_cis", {"name_contains": "web"})
+        assert h.calls[-1].url.path.split("/")[4] == "cmdb_ci"
         # invalid input is rejected before any further ServiceNow call
         before = len(h.calls)
         assert is_error(await call(c, "get_journal", {"identifier": "bogus"}), "invalid input")

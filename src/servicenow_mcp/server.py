@@ -278,8 +278,9 @@ def create_mcp(settings: Settings, client: ServiceNowClient) -> FastMCP:
             limit: Annotated[int, Field(ge=1, le=100, description="Page size (the server may cap this lower; default cap 50)")] = 10,
             offset: Annotated[int, Field(ge=0, le=10000, description="Use next_offset from the previous page")] = 0,
         ) -> dict[str, Any]:
-            """Find configuration items by name and/or class (at least one is required). Use the returned
-            sys_id as cmdb_ci on incidents, problems and changes."""
+            """Find configuration items by name and/or class (at least one is required). Returns every populated
+            field of each CI (with ci_class, the class-specific fields too). Use the returned sys_id as cmdb_ci
+            on incidents, problems and changes."""
             params = {"name_contains": name_contains, "ci_class": ci_class, "limit": limit, "offset": offset}
 
             async def run() -> dict[str, Any]:

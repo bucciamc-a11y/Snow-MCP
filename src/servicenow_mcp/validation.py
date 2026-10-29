@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 SYS_ID_RE = re.compile(r"^[0-9a-f]{32}\Z")
@@ -98,6 +98,7 @@ class Search:
     query: str
     limit: int
     offset: int
+    table: str = ""  # only set for CMDB lookups, where the CI class table is queried directly
 
 
 _RATING_MAX = {"priority": 5, "urgency": 3, "impact": 3}
@@ -190,7 +191,7 @@ def build_incident_search(
     return _finish_search(clauses, ORDER_FIELDS, order_by, descending, limit, offset, max_limit)
 
 
-_CI_CLASS_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}\Z")
+_CI_CLASS_RE = re.compile(r"^cmdb_ci(_[a-z0-9_]{1,70})?\Z")
 
 
 def build_ci_search(*, name_contains: str | None = None, ci_class: str | None = None, limit: int = 10,
@@ -207,7 +208,9 @@ def build_ci_search(*, name_contains: str | None = None, ci_class: str | None = 
         clauses.append(f"sys_class_name={cls}")
     if not clauses:
         raise ValidationError("provide name_contains or ci_class")
-    return _finish_search(clauses, {"name": "name"}, "name", False, limit, offset, max_limit)
+    search = _finish_search(clauses, {"name": "name"}, "name", False, limit, offset, max_limit)
+    # Querying the class table (not just cmdb_ci) is what returns class-specific columns (ip_address, os, ...).
+    return replace(search, table=cls if ci_class is not None else "cmdb_ci")
 
 
 # ---------------------------------------------------------------------------

@@ -89,6 +89,7 @@ _WHOISONCALL_PATH = "/api/now/on_call_rota/whoisoncall"
 # What may be read, and what may be written. Anything else raises before a request is built.
 _READ_TABLES = {"incident", "change_request", "problem", "sysapproval_approver", "cmn_rota",
                 "cmn_rota_roster", "cmn_rota_member", "sys_journal_field", "cmdb_ci"}
+_CI_TABLE_RE = re.compile(r"^cmdb_ci(_[a-z0-9_]{1,70})?\Z")  # CMDB CI class tables are read-only
 _WRITES = {
     ("POST", "incident"),
     ("PATCH", "incident"),
@@ -239,7 +240,7 @@ class ServiceNowClient:
         write = method != "GET"
         if write and (method, table) not in _WRITES:
             raise ValueError(f"internal: {method} on {table} is not permitted")
-        if not write and table not in _READ_TABLES:
+        if not write and table not in _READ_TABLES and not _CI_TABLE_RE.match(table):
             raise ValueError(f"internal: reading {table} is not permitted")
         return await self._send(method, self._table_path(table, sys_id), params or {}, body)
 
@@ -249,7 +250,7 @@ class ServiceNowClient:
             raise ValueError("internal: path not permitted")
         if path.startswith(_TABLE_PATH):
             table = path[len(_TABLE_PATH):].split("/")[0]
-            if table not in _READ_TABLES:
+            if table not in _READ_TABLES and not _CI_TABLE_RE.match(table):
                 raise ValueError(f"internal: reading {table} is not permitted")
         return await self._send("GET", path, params, None)
 
@@ -343,9 +344,11 @@ class ServiceNowClient:
             raise NotFoundError
         return _clean(result, self._max_text)
 
-    async def _list(self, table: str, query: str, fields: str, limit: int, offset: int = 0
+    async def _list(self, table: str, query: str, fields: str | None, limit: int, offset: int = 0
                     ) -> tuple[list[dict[str, Any]], int | None]:
-        params = self._display_params(fields)
+        params = self._display_params(fields or "")
+        if not fields:  # no field list: ServiceNow returns every column of the record
+            del params["sysparm_fields"]
         params.update({"sysparm_query": query, "sysparm_limit": str(limit), "sysparm_offset": str(offset)})
         try:
             data, total = await self._request("GET", table, params=params)
@@ -534,7 +537,8 @@ class ServiceNowClient:
                 "next_offset": _next_offset(offset, len(rows), total, limit), "entries": rows}
 
     async def search_cis(self, search: Search) -> dict[str, Any]:
-        rows, total = await self._list("cmdb_ci", search.query, CI_FIELDS, search.limit, search.offset)
+        # All fields (empty ones are dropped by _clean), from the CI class table when a class was given.
+        rows, total = await self._list(search.table or "cmdb_ci", search.query, None, search.limit, search.offset)
         return {"count": len(rows), "total_count": total, "offset": search.offset,
                 "next_offset": _next_offset(search.offset, len(rows), total, search.limit), "cis": rows}
 
