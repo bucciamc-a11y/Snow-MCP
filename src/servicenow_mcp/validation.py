@@ -205,8 +205,9 @@ def build_ci_search(*, name_contains: str | None = None, ci_class: str | None = 
         cls = ci_class.strip() if isinstance(ci_class, str) else ""
         if not _CI_CLASS_RE.match(cls):
             raise ValidationError("ci_class must be a table name such as cmdb_ci_server")
-        clauses.append(f"sys_class_name={cls}")
-    if not clauses:
+        # No sys_class_name clause: the class table already includes every subclass (cmdb_ci_server covers
+        # Linux, Windows, ... servers), which is what "all servers" means.
+    if not clauses and (ci_class is None or cls == "cmdb_ci"):
         raise ValidationError("provide name_contains or ci_class")
     search = _finish_search(clauses, {"name": "name"}, "name", False, limit, offset, max_limit)
     # Querying the class table (not just cmdb_ci) is what returns class-specific columns (ip_address, os, ...).

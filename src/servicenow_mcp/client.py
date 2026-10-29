@@ -537,10 +537,29 @@ class ServiceNowClient:
                 "next_offset": _next_offset(offset, len(rows), total, limit), "entries": rows}
 
     async def search_cis(self, search: Search) -> dict[str, Any]:
-        # All fields (empty ones are dropped by _clean), from the CI class table when a class was given.
-        rows, total = await self._list(search.table or "cmdb_ci", search.query, None, search.limit, search.offset)
+        """CIs with every populated field. The queried table (e.g. cmdb_ci_server) includes its subclasses, but
+        a parent table only returns its own columns, so each row is re-read from its own class table."""
+        params = {"sysparm_query": search.query, "sysparm_limit": str(search.limit),
+                  "sysparm_offset": str(search.offset), "sysparm_fields": "sys_id,sys_class_name",
+                  "sysparm_display_value": "false", "sysparm_exclude_reference_link": "true"}
+        try:
+            data, total = await self._request("GET", search.table or "cmdb_ci", params=params)
+        except NotFoundError:
+            data, total = {"result": []}, 0
+        stubs = data["result"] if isinstance(data["result"], list) else []
+        order = [r["sys_id"] for r in stubs if isinstance(r, dict) and r.get("sys_id")]
+        by_class: dict[str, list[str]] = {}
+        for r in stubs:
+            if isinstance(r, dict) and r.get("sys_id"):
+                cls = r.get("sys_class_name") or ""
+                by_class.setdefault(cls if _CI_TABLE_RE.match(cls) else "cmdb_ci", []).append(r["sys_id"])
+        found: dict[str, dict[str, Any]] = {}
+        for cls, ids in by_class.items():  # one query per distinct class, not per CI
+            rows, _ = await self._list(cls, "sys_idIN" + ",".join(ids), None, len(ids))
+            found.update({r["sys_id"]: r for r in rows if "sys_id" in r})
+        rows = [found[i] for i in order if i in found]
         return {"count": len(rows), "total_count": total, "offset": search.offset,
-                "next_offset": _next_offset(search.offset, len(rows), total, search.limit), "cis": rows}
+                "next_offset": _next_offset(search.offset, len(order), total, search.limit), "cis": rows}
 
     # -- connectivity check ------------------------------------------------------
     async def check_connectivity(self, tables: tuple[str, ...] = ("incident", "change_request")) -> dict[str, str]:
